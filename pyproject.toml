@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "multipage-classifier"
+version = "0.1.0"
+description = ""
+authors = ["Johannes Scheibe <scheibe.johannes@t-online.de>"]
+readme = "README.md"
+packages = [{include = "multipage-classifier"}]
+
+[tool.poetry.dependencies]
+python = "^3.10.0"
+torch = "^1.13.1"
+torchvision = "^0.14.1"
+transformers = "^4.26.0"
+sentencepiece = "^0.1.97"
+
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.20.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
