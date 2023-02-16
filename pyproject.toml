@@ -4,7 +4,7 @@ version = "0.1.0"
 description = ""
 authors = ["Johannes Scheibe <scheibe.johannes@t-online.de>"]
 readme = "README.md"
-packages = [{include = "multipage-classifier"}]
+packages = [{include = "multipage_classifier"}]
 
 [tool.poetry.dependencies]
 python = "^3.10.0"
@@ -12,6 +12,7 @@ torch = "^1.13.1"
 torchvision = "^0.14.1"
 transformers = "^4.26.0"
 sentencepiece = "^0.1.97"
+pytorch-lightning = "^1.9.1"
 
 
 [tool.poetry.group.dev.dependencies]
