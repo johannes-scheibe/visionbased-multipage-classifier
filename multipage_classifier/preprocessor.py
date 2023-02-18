@@ -44,4 +44,4 @@ class ImageProcessor:
         )
 
         pixel_values = torch.Tensor(self.to_tensor(ImageOps.expand(img, padding)))
-        return pixel_values.unsqueeze(0)
+        return pixel_values

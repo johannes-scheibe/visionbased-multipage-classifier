@@ -17,6 +17,7 @@ class UCSFDataset(Dataset):
         self,
         dataset_path: Path,
         labels: List[dict],
+        classes: List[str],
         prepare_function
     ):
         super().__init__()
@@ -25,11 +26,7 @@ class UCSFDataset(Dataset):
         
         self.prepare_function = prepare_function
 
-        self.classes = []
-        for l in self.labels:
-            if l["type"] not in self.classes:
-                self.classes.append(type)
-
+        self.classes = classes
         self.id2class = {idx: str(label) for idx, label in enumerate(self.classes)}
         self.class2id = {str(label): idx for idx, label in enumerate(self.classes)}
         
@@ -41,7 +38,6 @@ class UCSFDataset(Dataset):
     def __getitem__(self, idx: int):
         
         label = self.labels[idx]
-
         img_folder = label["image_folder"]
 
         pages = []
@@ -50,9 +46,9 @@ class UCSFDataset(Dataset):
             pages.append(
                 {
                     "pixel_values": self.prepare_function(Image.open(path)),
-                    "letter_id": label["id"], # we can set this to the doc_id because its unique as well 
-                    "doc_class":  label["type"],
-                    "doc_id": label["id"], 
+                    #"letter_id": label["id"], # we can set this to the doc_id because its unique as well 
+                    "doc_class":  self.class2id[label["type"]],
+                    #"doc_id": label["id"], # set this in collate
                     "page_nr": i
                 }
             )
@@ -78,6 +74,11 @@ class UCSFDataModule(pl.LightningDataModule):
 
         random.shuffle(labels)
 
+        self.classes = []
+        for l in labels:
+            if l["type"] not in self.classes:
+                self.classes.append(l["type"])
+
         n = len(labels)
         sizes = [int(n * p) for p in self.split]
         slices = []
@@ -94,13 +95,13 @@ class UCSFDataModule(pl.LightningDataModule):
             
     def setup(self, stage=None):
         self.train_dataset = UCSFDataset(
-            self.dataset_path, self.train_labels, self.prepare_function
+            self.dataset_path, self.train_labels, self.classes, self.prepare_function
         )
         self.val_dataset = UCSFDataset(
-            self.dataset_path, self.val_labels, self.prepare_function
+            self.dataset_path, self.val_labels, self.classes, self.prepare_function
         )
         self.test_dataset = UCSFDataset(
-            self.dataset_path, self.test_labels, self.prepare_function
+            self.dataset_path, self.test_labels, self.classes, self.prepare_function
         )
 
     def train_dataloader(self):
@@ -136,20 +137,25 @@ class UCSFDataModule(pl.LightningDataModule):
 
 def collate(samples: List[List[dict]], shuffle_mode="window"): # "all", "none"
     prep_samples: List[dict] = []
-    for sample in samples:  
+    for i, sample in enumerate(samples):  
+        for page in sample: 
+            page["letter_id"] = 0 # always same letter
+            page["doc_id"] = i
         if shuffle_mode == "all":
             random.shuffle(sample)
         elif shuffle_mode == "window":
             window_shuffle(sample)
         prep_samples.extend(sample)
 
-    batch = [sample for sample in prep_samples]
-    ret = default_collate(batch)
+    ret = default_collate(prep_samples)
     return ret
 
 def val_collate(samples: List[List[dict]]) -> Dict:
     prep_samples: List[dict] = []
-    for sample in samples:
+    for i, sample in enumerate(samples): 
+        for page in sample: 
+            page["letter_id"] = 0 # always same letter
+            page["doc_id"] = i
         prep_samples.extend(sample)
     batch = [sample for sample in prep_samples]
 

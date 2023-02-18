@@ -21,7 +21,7 @@ class EncoderForEmbedding(pl.LightningModule):
 
     def __init__(self, encoder: nn.Module, hidden_dim):
         super().__init__()
-        self.save_hyperparameters()
+        #self.save_hyperparameters()
 
         self.encoder = encoder
 
@@ -30,7 +30,7 @@ class EncoderForEmbedding(pl.LightningModule):
 
         # create order head
         self.heads = torch.nn.ModuleDict({})
-        self.heads["order"] = torch.nn.Linear(self.hidden_dim * 2, len(ORDER_NAMES))
+        self.heads["order"] = torch.nn.Linear(self.hidden_dim, len(ORDER_NAMES))
         self.weights = torch.nn.ParameterDict({})
         self.weights["order"] = torch.nn.parameter.Parameter(
             data=torch.Tensor([0.1, 1, 1, 1]).float(), requires_grad=False
@@ -52,17 +52,15 @@ class EncoderForEmbedding(pl.LightningModule):
 
     def step(self, batch: Any):
         emb = self.forward(batch)
-        print(emb.size())
         bs = len(emb)
 
         preds: Dict[str, torch.Tensor] = {}
         ground_truth = {}
-
+        
         # Compute order head input
         diff = (emb.unsqueeze(1) - emb.unsqueeze(0)).view(-1, self.hidden_dim)
-        diff = torch.cat([diff, diff], -1)
-        print(diff.size())
-        
+        #diff = torch.cat([diff, diff], -1)
+
         preds["order"] = torch.log_softmax(self.heads["order"](diff), dim=-1)
 
         same_doc = (batch["doc_id"].unsqueeze(1) == batch["doc_id"].unsqueeze(0)).int()
