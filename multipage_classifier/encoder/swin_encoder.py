@@ -1,25 +1,20 @@
 from functools import partial
-import warnings
-from inspect import signature
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, List, Optional
 
-import numpy as np
-import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
-from transformers import AdamW, AutoModel
-
-from torchvision.models.swin_transformer import PatchMerging, SwinTransformerBlock, SwinTransformerBlockV2, Permute
 from pydantic import BaseModel
+from torchvision.models.swin_transformer import (PatchMerging, Permute,
+                                                 SwinTransformerBlock,
+                                                 SwinTransformerBlockV2)
+
 
 class SwinEncoderConfig(BaseModel):
-    patch_size = [4,4]
-    embed_dim = 128
-    depths = [2, 2, 14, 2]
-    num_heads = [4, 8, 16, 32]
-    window_size = [10,10]
+    patch_size: List[int] = [4,4]
+    embed_dim: int = 128
+    depths: List[int] = [2, 2, 14, 2]
+    num_heads: List[int] = [4, 8, 16, 32]
+    window_size: List[int] = [10,10]
 
 
 class SwinEncoder(nn.Module):
@@ -105,8 +100,8 @@ class SwinEncoder(nn.Module):
                 layers.append(downsample_layer(dim, norm_layer))
         self.features = nn.Sequential(*layers)
 
-        self.num_features = embed_dim * 2 ** (len(depths) - 1)
-        self.norm = norm_layer(self.num_features)
+        self.hidden_dim = embed_dim * 2 ** (len(depths) - 1)
+        self.norm = norm_layer(self.hidden_dim)
         self.permute = Permute([0, 3, 1, 2])
         self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.flatten = nn.Flatten(1)
@@ -117,7 +112,7 @@ class SwinEncoder(nn.Module):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
-    def forward(self, pixel_values):
+    def forward(self, pixel_values) -> torch.Tensor:
         x = self.features(pixel_values)
         x = self.norm(x)
         x = self.permute(x)
@@ -125,84 +120,3 @@ class SwinEncoder(nn.Module):
         x = self.flatten(x)
         return x
 
-ORDER_NAMES = ["None", "Pred", "Succ", "Same"]
-
-class EncoderPLModule(pl.LightningModule):
-    encoder: SwinEncoder
-
-    def __init__(self, config: SwinEncoderConfig):
-        super().__init__()
-        
-        self.save_hyperparameters()
-
-        self.encoder = SwinEncoder(**config.dict())
-
-        self.hidden_dim = self.encoder.num_features
-
-        self.model_input_keys = list(signature(self.encoder.forward).parameters.keys())
-
-        self.order_head = torch.nn.Sequential(
-            torch.nn.Linear(self.hidden_dim * 2, len(ORDER_NAMES)),
-            torch.nn.ReLU(),
-            torch.nn.Linear(len(ORDER_NAMES), len(ORDER_NAMES))
-        )
-
-
-
-    def forward(self, batch, **kwargs) -> torch.Tensor:
-        model_input = {k: v for k, v in batch.items() if k in self.model_input_keys}
-
-        cls_embeddings = self.encoder(**model_input)
-
-        return cls_embeddings
-
-    def step(self, batch: Any):
-        emb = self.forward(batch)
-
-        # Compute order head input
-        bs = len(emb)
-        diff = emb.unsqueeze(0).repeat(bs, 1, 1)
-        diff = torch.cat([diff, diff.permute(1, 0, 2)], -1).view(-1, self.hidden_dim * 2)
-
-        same_doc = (batch["doc_id"].unsqueeze(1) == batch["doc_id"].unsqueeze(0)).int()
-        same_letter = (batch["letter_id"].unsqueeze(1) == batch["letter_id"].unsqueeze(0)).int()
-        less = (batch["page_nr"].unsqueeze(1) < batch["page_nr"].unsqueeze(0)).int() * 1
-        greater = (batch["page_nr"].unsqueeze(1) > batch["page_nr"].unsqueeze(0)).int() * 2
-        same = (batch["page_nr"].unsqueeze(1) == batch["page_nr"].unsqueeze(0)).int() * 3
-
-        ground_truth = (
-            ((less + greater + same) * same_doc * same_letter).long().view(-1)
-        )  # [ones]
-
-        pred = torch.log_softmax(self.order_head(diff), dim=-1)
-
-        loss = torch.nn.NLLLoss()(pred, ground_truth)
-
-        return pred, ground_truth, loss
-
-
-
-    def training_step(self, batch: Any, batch_idx: int):
-        pred, gt, loss = self.step(batch)
-        metrics = {"loss": loss}
-        self.log_dict(metrics)
-        return metrics
-
-    def validation_step(self, batch: Any, batch_idx: int):
-        pred, gt, loss = self.step(batch)
-        metrics = {"val_loss": loss}
-        self.log_dict(metrics)
-        return metrics
-
-    def test_step(self, batch: Any, batch_idx: int):
-        pred, gt, loss = self.step(batch)
-        metrics = {"test_loss": loss}
-        self.log_dict(metrics)
-        return metrics
-
-    def configure_optimizers(self):
-        lr = 2e-5
-        weight_decay = 1e-4
-
-        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, weight_decay=weight_decay)
-        return [optimizer]

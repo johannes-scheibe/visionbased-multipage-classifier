@@ -7,7 +7,7 @@ import random
 from typing import Dict, List
 
 import pytorch_lightning as pl
-import torch
+
 from torch.utils.data import DataLoader, Dataset, default_collate
 
 from PIL import Image
@@ -18,7 +18,8 @@ class UCSFDataset(Dataset):
         dataset_path: Path,
         labels: List[dict],
         classes: List[str],
-        prepare_function
+        prepare_function,
+        max_pages: int
     ):
         super().__init__()
         self.dataset_path = dataset_path
@@ -29,50 +30,81 @@ class UCSFDataset(Dataset):
         self.classes = classes
         self.id2class = {idx: str(label) for idx, label in enumerate(self.classes)}
         self.class2id = {str(label): idx for idx, label in enumerate(self.classes)}
-        
-        self.dataset_length = len(self.labels)
+
+        self.max_pages = max_pages
+
+        total_num_pages = sum(item['pages'] for item in self.labels)
+        self.dataset_length = int(total_num_pages / self.max_pages)
 
     def __len__(self):
         return self.dataset_length
 
+
     def __getitem__(self, idx: int):
-        
-        label = self.labels[idx]
+        stack = []
+        num_pages = 0
+
+        doc_id = 0
+
+        while True:
+
+            i = random.randint(0, len(self.labels) - 1)
+
+            label = self.labels[i]
+            
+            if num_pages + label["pages"] > self.max_pages:
+                if len(stack) == 0:
+                    continue
+                break
+                
+            stack.append(self._prepare_doc(i, doc_id=doc_id))
+            
+            num_pages = num_pages + label["pages"]
+            doc_id += 1
+            
+
+        return stack
+    
+    def _prepare_doc(self, page_idx, doc_id):
+        label = self.labels[page_idx]
+
         img_folder = label["image_folder"]
 
-        pages = []
-        for i, file in enumerate(os.listdir(self.dataset_path / img_folder)):
+        doc_pages = []
+
+        for page_idx in range(label["pages"]):
+            file = f"page_{page_idx}.jpg"
             path = self.dataset_path / img_folder / file
-            pages.append(
+
+            doc_pages.append(
                 {
                     "pixel_values": self.prepare_function(Image.open(path)),
-                    #"letter_id": label["id"], # we can set this to the doc_id because its unique as well 
+                    "letter_id": 0,  # always same letter
+                    "doc_id": doc_id,
                     "doc_class":  self.class2id[label["type"]],
-                    #"doc_id": label["id"], # set this in collate
-                    "page_nr": i
+                    "page_nr": page_idx
                 }
             )
-        return pages
 
+        return doc_pages
 
 
 class UCSFDataModule(pl.LightningDataModule):
-    def __init__(self, dataset_path, prepare_function, split: list = [0.8, 0.2], batch_size=8, num_workers: int = 1):
+    def __init__(self, dataset_path, ds_file,  prepare_function, split: list = [0.8, 0.2], max_pages=64, num_workers: int = 1):
         super().__init__()
-        self.dataset_path = dataset_path
+        self.dataset_path = Path(dataset_path)
+        self.ds_file = ds_file
         self.prepare_function = prepare_function
 
         assert math.fsum(split) == 1.0, f"{split} doesn't add up to 1 ({math.fsum(split)})"
         assert len(split) in [2, 3], f"Length of {split} is not in [2, 3] ({len(split)})"
 
         self.split = split
-        self.batch_size = batch_size
+        self.max_pages = max_pages
         self.num_workers = num_workers
 
     def prepare_data(self):
-        labels = json.load(open(self.dataset_path / "labels.json"))
-
-        random.shuffle(labels)
+        labels = json.load(open(self.dataset_path / self.ds_file))["labels"]
 
         self.classes = []
         for l in labels:
@@ -95,19 +127,19 @@ class UCSFDataModule(pl.LightningDataModule):
             
     def setup(self, stage=None):
         self.train_dataset = UCSFDataset(
-            self.dataset_path, self.train_labels, self.classes, self.prepare_function
+            self.dataset_path, self.train_labels, self.classes, self.prepare_function, self.max_pages
         )
         self.val_dataset = UCSFDataset(
-            self.dataset_path, self.val_labels, self.classes, self.prepare_function
+            self.dataset_path, self.val_labels, self.classes, self.prepare_function, self.max_pages
         )
         self.test_dataset = UCSFDataset(
-            self.dataset_path, self.test_labels, self.classes, self.prepare_function
+            self.dataset_path, self.test_labels, self.classes, self.prepare_function, self.max_pages
         )
 
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
-            batch_size=self.batch_size,
+            batch_size=1,
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=True,
@@ -117,7 +149,7 @@ class UCSFDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(
             self.val_dataset,
-            batch_size=self.batch_size,
+            batch_size=1,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
@@ -127,42 +159,39 @@ class UCSFDataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(
             self.test_dataset,
-            batch_size=self.batch_size,
+            batch_size=1,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
             collate_fn=val_collate,
         )
+    
 
-
-def collate(samples: List[List[dict]], shuffle_mode="window"): # "all", "none"
+def collate(data: List[List[List[dict]]], shuffle_mode="window"):  # "all", "none"
+    samples = data[0]
     prep_samples: List[dict] = []
-    for i, sample in enumerate(samples):  
-        for page in sample: 
-            page["letter_id"] = 0 # always same letter
-            page["doc_id"] = i
+    for i, sample in enumerate(samples):           
         if shuffle_mode == "all":
             random.shuffle(sample)
         elif shuffle_mode == "window":
-            window_shuffle(sample)
+            sample = window_shuffle(sample)
         prep_samples.extend(sample)
 
     ret = default_collate(prep_samples)
     return ret
 
-def val_collate(samples: List[List[dict]]) -> Dict:
-    prep_samples: List[dict] = []
-    for i, sample in enumerate(samples): 
-        for page in sample: 
-            page["letter_id"] = 0 # always same letter
-            page["doc_id"] = i
-        prep_samples.extend(sample)
-    batch = [sample for sample in prep_samples]
+
+def val_collate(data: List[List[List[dict]]]) -> Dict:
+    samples = data[0]
+    batch: List[dict] = []
+    for i, sample in enumerate(samples):
+        batch.extend(sample)
 
     # Using the whole batch could use too much memory. Monitor this.
     ret = default_collate(batch)
 
     return ret
+
 
 def window_shuffle(input_list, window_size=3, shuffle_percent=0.25):
     shuffle_idxs = random.sample(
