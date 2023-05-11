@@ -100,7 +100,6 @@ class BaseLightningModule(pl.LightningModule):
         # Compute confusion matrax
         for k, v in self.confmat.items():
             confmat: Metric = v[f"_{self.mode.value}"]
-
             # Log the confusion matrix as a figure
             self.logger.experiment.add_figure(
                 f"{self.mode.value}_confmat_{k}",
@@ -127,6 +126,7 @@ class BaseLightningModule(pl.LightningModule):
     def update_metrics(self, pred: Dict, gt):
         for k, v in pred.items():
             self.metrics[k][f"_{self.mode.value}"].update(v, gt[k])
+            self.confmat[k][f"_{self.mode.value}"].update(v, gt[k])
 
     def log_metrics(self, metrics: Dict):
         self.log_dict(
