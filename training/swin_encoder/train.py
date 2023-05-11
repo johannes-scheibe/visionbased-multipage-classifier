@@ -56,7 +56,7 @@ checkpoint_callback = ModelCheckpoint(
     filename="best-checkpoint",
     save_top_k=1,
     verbose=True,
-    monitor="val_loss",
+    monitor="val/loss",
     mode="min",
     save_last=True,
 )
