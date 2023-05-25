@@ -3,6 +3,7 @@ name = "multipage-classifier-training"
 version = "0.1.0"
 description = ""
 authors = ["Johannes Scheibe <scheibe.johannes@t-online.de>"]
+packages = [{include = "utils"}]
 
 [tool.poetry.dependencies]
 multipage-classifier = { path = "../", develop=true}
