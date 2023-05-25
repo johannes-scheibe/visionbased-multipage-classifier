@@ -92,24 +92,26 @@ class BaseLightningModule(pl.LightningModule):
 
     def shared_epoch_end(self, _) -> None:
         # Compute metrics:
-        for k, v in self.metrics.items():
-            metric: Metric = v[f"_{self.mode.value}"]
-            self.log_metrics(metric.compute())
-            metric.reset()
+        if hasattr(self, "metrics"):
+            for k, v in self.metrics.items():
+                metric: Metric = v[f"_{self.mode.value}"]
+                self.log_metrics(metric.compute())
+                metric.reset()
 
         # Compute confusion matrax
-        for k, v in self.confmat.items():
-            confmat: Metric = v[f"_{self.mode.value}"]
-            # Log the confusion matrix as a figure
-            self.logger.experiment.add_figure(
-                f"{self.mode.value}_confmat_{k}",
-                self.get_confusion_matrix(
-                    confmat.compute().cpu().data.numpy(), confmat.num_classes
-                ),
-                self.global_step,
-            )
-            # Reset the confusion matrix for the next epoch
-            confmat.reset()
+        if hasattr(self, "confmat"):
+            for k, v in self.confmat.items():
+                confmat: Metric = v[f"_{self.mode.value}"]
+                # Log the confusion matrix as a figure
+                self.logger.experiment.add_figure(
+                    f"{self.mode.value}_confmat_{k}",
+                    self.get_confusion_matrix(
+                        confmat.compute().cpu().data.numpy(), confmat.num_classes
+                    ),
+                    self.global_step,
+                )
+                # Reset the confusion matrix for the next epoch
+                confmat.reset()
 
     def get_confusion_matrix(self, cf_matrix, num_classes):
         fig, ax = plt.subplots(
