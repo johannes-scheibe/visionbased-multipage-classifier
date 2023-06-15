@@ -8,7 +8,7 @@ class MultipageEncoder(nn.Module):
     def __init__(
         self,
         encoder: SwinEncoder, # TODO support general encoders
-        max_pages: int = 64,
+        max_pages: int,
     ):
         super().__init__()
 
@@ -27,12 +27,13 @@ class MultipageEncoder(nn.Module):
         
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        pixel_values.size()
         page_embeddings = self.page_encoder(pixel_values) # TODO calc batchwise
+
         pos_embedding = self.pos_embedding_layer(
             torch.arange(0, len(page_embeddings), device=page_embeddings.device)
         )
 
         document_embeddings = self.transformer_encoder(page_embeddings.unsqueeze(0) + pos_embedding.unsqueeze(0))
 
-        return document_embeddings.squeeze(0)
+        return document_embeddings.view(-1, self.hidden_dim)
+        

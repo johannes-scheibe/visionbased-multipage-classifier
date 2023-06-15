@@ -48,7 +48,7 @@ class SwinEncoderPLModule(BaseLightningModule):
         bs = len(emb)
         diff = emb.unsqueeze(0).repeat(bs, 1, 1)
         diff = torch.cat([diff, diff.permute(1, 0, 2)], -1).view(-1, self.hidden_dim * 2)
-
+        
         # Compute the prediction
         pred = {} 
         pred["order"] = torch.log_softmax(self.order_head(diff), dim=-1)
@@ -64,12 +64,12 @@ class SwinEncoderPLModule(BaseLightningModule):
             ((less + greater + same) * same_doc * same_letter).long().view(-1)
         )  # [ones]
 
-        losses = {"order_loss": torch.nn.NLLLoss()(pred["order"], gt["order"])}
+        loss = {"order_loss": torch.nn.NLLLoss()(pred["order"], gt["order"])}
 
         return (
             pred,
             gt,
-            losses
+            loss
         )
 
     def configure_optimizers(self):

@@ -10,11 +10,11 @@ from torchvision.models.swin_transformer import (PatchMerging, Permute,
 
 
 class SwinEncoderConfig(BaseModel):
-    patch_size: List[int] = [4,4]
-    embed_dim: int = 128
-    depths: List[int] = [2, 2, 14, 2]
-    num_heads: List[int] = [4, 8, 16, 32]
-    window_size: List[int] = [10,10]
+    patch_size: List[int]
+    embed_dim: int
+    depths: List[int]
+    num_heads: List[int]
+    window_size: List[int]
 
 
 class SwinEncoder(nn.Module):
@@ -120,3 +120,41 @@ class SwinEncoder(nn.Module):
         x = self.flatten(x)
         return x
 
+
+def swin_tiny_cfg():
+    return SwinEncoderConfig(
+        patch_size=[4, 4],
+        embed_dim=96,
+        depths=[2, 2, 6, 2],
+        num_heads=[3, 6, 12, 24],
+        window_size=[7, 7]
+    )
+
+def swin_small_cfg():
+    return SwinEncoderConfig(
+        patch_size=[4, 4],
+        embed_dim=96,
+        depths=[2, 2, 18, 2],
+        num_heads=[3, 6, 12, 24],
+        window_size=[7, 7],
+    )
+
+def swin_base_cfg():
+    return SwinEncoderConfig(
+        patch_size=[4, 4],
+        embed_dim=128,
+        depths=[2, 2, 18, 2],
+        num_heads=[4, 8, 16, 32],
+        window_size=[7, 7],
+    )
+
+def swin_donut_cfg():
+    return SwinEncoderConfig(
+        patch_size=[4, 4],
+        embed_dim=128,
+        depths=[2, 2, 14, 2],
+        num_heads=[4, 8, 16, 32],
+        window_size=[10,10],
+    )
+
+# TODO swin v2 ? Pretrained weights ?

@@ -8,8 +8,9 @@ import torch.nn as nn
 
  
 class DocumentSeparatorConfig(BaseModel):
-    batch_size: int = 8
+    num_classes: int
     max_pages: int = 64
+    
     doc_nr_group_threshold: float = 0.5
 
     embedding_size: int 
@@ -24,35 +25,45 @@ class DocumentSeparator(nn.Module):
         super().__init__()
         self.config = config
 
-        self.doc_id = nn.Sequential(
-            nn.Linear(self.config.embedding_size, int(self.config.embedding_size/2)),
-            nn.ReLU(),
-            nn.Linear(int(self.config.embedding_size/2), self.config.max_pages),
-
-        )
-        self.doc_id = nn.Sequential(
-            nn.Linear(self.config.embedding_size, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 512),
-            nn.ReLU(),
-            nn.Linear(512, self.config.max_pages)
-        )
+        self.heads = nn.ModuleDict({})
+        self.heads["doc_class"] = self.get_head([self.config.embedding_size, self.config.num_classes])
+        self.heads["page_nr"] = self.get_head([self.config.embedding_size, self.config.max_pages])
+        self.heads["doc_id"] = self.get_head([self.config.embedding_size, self.config.max_pages])
 
         self.cluster_prediction = DBSCAN(
             eps=self.config.doc_nr_group_threshold, min_samples=1, metric="precomputed"
         )
-        
-    def forward(self, embeddings: torch.Tensor):
-        pred = self.doc_id(embeddings).sigmoid()
-        return pred
+
+    def get_head(self, dims) -> nn.Sequential:
+        layers = []
+        for i in range(len(dims) - 1):
+            layers.append(nn.Linear(dims[i], dims[i + 1]))
+            layers.append(nn.ReLU())
+
+        return nn.Sequential(*layers[:-1])
+         
+    def forward(self, embeddings: torch.Tensor) -> dict[str, torch.Tensor]:
+        preds: dict[str, torch.Tensor] = {}
+        for k, v in self.heads.items():
+            if k == "doc_id":
+                continue
+            preds[k] = torch.log_softmax(v(embeddings), dim=-1)
+        preds["doc_id"] = self.heads["doc_id"](embeddings).sigmoid()
+
+        return preds
     
     def get_groups(self, probability_matrix) -> np.ndarray:
         cost = 1 - ((probability_matrix + probability_matrix.transpose(1, 0)) / (2))
         return self.cluster_prediction.fit_predict(cost)   
     
-    def postprocess(self, prediction: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        prediction = prediction[:, : len(prediction)]
-        doc_id = self.get_groups(prediction.cpu().data.numpy())
-        doc_id_prob = (prediction - 0.5).abs().mean() * 2
+    def postprocess(self, preds: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        out = {}
+        out.update(preds)
 
-        return torch.tensor(doc_id, device=prediction.device), doc_id_prob
+        preds["doc_id"] = preds["doc_id"][:, : len(preds["doc_id"])]
+        out["doc_id"] = torch.tensor(
+            self.get_groups(preds["doc_id"].cpu().data.numpy()), device=preds["doc_id"].device
+        )
+        out["doc_id_prob"] = (preds["doc_id"] - 0.5).abs().mean() * 2
+
+        return out

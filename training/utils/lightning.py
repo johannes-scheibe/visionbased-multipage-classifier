@@ -26,26 +26,29 @@ class BaseLightningModule(pl.LightningModule):
         self,
         name: str,
         task: Literal["binary", "multiclass", "multilabel"],
-        num_classes: int,
+        num_classes: int | None = None,
+        num_labels: int | None= None,
     ) -> Tuple[ModuleDict, ModuleDict]:
         metrics = ModuleDict({})
         confusion_matrices = ModuleDict({})
 
         for mode in [m.value for m in Mode]:
-            top_k = min(num_classes - 1, 3)
+            n = num_classes or num_labels 
+            assert n
+            top_k = min(n - 1, 3)
 
             curr_metrics = MetricCollection(
                 {
-                    "acc": Accuracy(task=task, num_classes=num_classes),
+                    "acc": Accuracy(task=task, num_classes=num_classes, num_labels=num_labels),
                     f"top{top_k}_acc": Accuracy(
-                        task=task, num_classes=num_classes, top_k=top_k
+                        task=task, num_classes=num_classes, num_labels=num_labels,  top_k=top_k
                     ),
                 },
                 postfix=f"_{name}",
             )
 
             curr_confusion_matrix = ConfusionMatrix(
-                task=task, num_classes=num_classes, normalize="true"
+                task=task, num_labels=num_labels, num_classes=num_classes, normalize="true"
             )
             metrics[f"_{mode}"] = curr_metrics
             confusion_matrices[f"_{mode}"] = curr_confusion_matrix
@@ -62,8 +65,8 @@ class BaseLightningModule(pl.LightningModule):
 
     def training_step(self, batch: Any, batch_idx: int) -> Dict[str, Any]:
         self.mode = Mode.TRAIN
-        pred, gt, losses = self.step(batch, batch_idx)
-        self.update_metrics(pred, gt)
+        preds, gt, losses = self.step(batch, batch_idx)
+        self.update_metrics(preds, gt)
         return self.log_losses(losses)
 
     def training_epoch_end(self, outputs) -> None:
@@ -72,8 +75,8 @@ class BaseLightningModule(pl.LightningModule):
 
     def validation_step(self, batch: Any, batch_idx: int) -> Dict[str, Any]:
         self.mode = Mode.VALID
-        pred, gt, losses = self.step(batch, batch_idx)
-        self.update_metrics(pred, gt)
+        preds, gt, losses = self.step(batch, batch_idx)
+        self.update_metrics(preds, gt)
         return self.log_losses(losses)
 
     def validation_epoch_end(self, outputs) -> None:
@@ -82,8 +85,8 @@ class BaseLightningModule(pl.LightningModule):
 
     def test_step(self, batch: Any, batch_idx: int) -> Dict[str, Any]:
         self.mode = Mode.TEST
-        pred, gt, losses = self.step(batch, batch_idx)
-        self.update_metrics(pred, gt)
+        preds, gt, losses = self.step(batch, batch_idx)
+        self.update_metrics(preds, gt)
         return self.log_losses(losses)
 
     def test_epoch_end(self, outputs) -> None:
@@ -127,8 +130,10 @@ class BaseLightningModule(pl.LightningModule):
 
     def update_metrics(self, pred: Dict, gt):
         for k, v in pred.items():
-            self.metrics[k][f"_{self.mode.value}"].update(v, gt[k])
-            self.confmat[k][f"_{self.mode.value}"].update(v, gt[k])
+            if k in self.metrics:
+                self.metrics[k][f"_{self.mode.value}"].update(v, gt[k])
+            if k in self.confmat:
+                self.confmat[k][f"_{self.mode.value}"].update(v, gt[k])
 
     def log_metrics(self, metrics: Dict):
         self.log_dict(

@@ -4,11 +4,12 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 
-from torchmetrics.classification import MulticlassConfusionMatrix
+
 from multipage_classifier.page_classifier import (MultipageClassifier,
                                                   MultipageClassifierConfig)
+from utils.lightning import BaseLightningModule
 
-class MultipageClassifierPLModule(pl.LightningModule):
+class MultipageClassifierPLModule(BaseLightningModule):
     
     def __init__(self, config: MultipageClassifierConfig):
         super().__init__()
@@ -17,15 +18,26 @@ class MultipageClassifierPLModule(pl.LightningModule):
 
         self.classifier = MultipageClassifier(config)
 
+        self.metrics = torch.nn.ModuleDict({})
+        self.confmat = torch.nn.ModuleDict({})
+        self.metrics["doc_class"], self.confmat["doc_class"] = self.get_metrics("doc_class", task="multiclass", num_classes=self.config.num_classes)        
+        self.metrics["page_nr"], self.confmat["page_nr"] = self.get_metrics("page_nr", task="multiclass", num_classes=self.config.max_pages)        
+        self.metrics["doc_id"], _ = self.get_metrics("doc_id", task="multilabel", num_labels=self.config.max_pages)        
+
+
         self.save_hyperparameters()
 
-    def step(self, batch: Any):
+    def step(self, batch: Any, *_) -> tuple[
+        dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor]
+    ]:
         batch_size = len(batch["doc_id"])
 
         # Predictions
-        pred = self.classifier.forward(batch["pixel_values"])
+        preds = self.classifier.forward(batch["pixel_values"])
 
         # Ground truth
+        gt = {}
+        gt.update({k: batch[k] for k in self.classifier.separator.heads.keys()})
         doc_ids = batch["doc_id"]
         doc_ids = torch.cat(
             [
@@ -34,30 +46,16 @@ class MultipageClassifierPLModule(pl.LightningModule):
                              len(doc_ids)), device=self.device),
             ]
         )
-        ground_truth = (doc_ids[:batch_size].view(-1, 1)
+        gt["doc_id"] = (doc_ids[:batch_size].view(-1, 1)
                         == doc_ids.view(1, -1)).float()
 
-        loss = sigmoid_focal_loss(pred, ground_truth)
-
-        return pred, ground_truth, loss  # TODO: Check this
-
-    def training_step(self, batch: Any, batch_idx: int):
-        _, _, loss = self.step(batch)
-        metrics = {"loss": loss}
-        self.log_dict(metrics)
-        return metrics
-
-    def validation_step(self, batch: Any, batch_idx: int):
-        pred, _, loss = self.step(batch)
-        metrics = {"val_loss": loss}
-        self.log_dict(metrics)
-        return metrics
-    
-    def test_step(self, batch: Any, batch_idx: int):
-        _, _, loss = self.step(batch)
-        metrics = {"test_loss": loss}
-        self.log_dict(metrics)
-        return metrics
+        losses = {}
+        for k, v in preds.items():
+            if k == "doc_id":
+                losses["doc_id_loss"] = sigmoid_focal_loss(v, gt[k])
+                continue
+            losses[f"{k}_loss"] = torch.nn.NLLLoss()(v, batch[k])
+        return preds, gt, losses
 
     def configure_optimizers(self):
         lr = 3e-5

@@ -13,20 +13,17 @@ from transformers import MBartConfig, MBartForCausalLM, MBartTokenizer
 
 from multipage_classifier.decoder.separator import DocumentSeparator, DocumentSeparatorConfig
 from multipage_classifier.encoder.multipage_encoder import MultipageEncoder
-from multipage_classifier.encoder.swin_encoder import SwinEncoder
+from multipage_classifier.encoder.swin_encoder import SwinEncoder, SwinEncoderConfig
 
 
 class MultipageClassifierConfig(BaseModel):
     input_size: List[int] = [2560, 1920]
+    num_classes: int 
     max_pages: int = 64
     max_seq_len: int = 768
 
     # Encoder params    
-    patch_size: List[int] = [8,8]
-    embed_dim = 96
-    depths: List[int] = [2, 2, 10, 2]
-    num_heads: List[int] = [4, 8, 16, 32]
-    window_size: List[int] = [7,7]
+    encoder_cfg: BaseModel
 
     # Decoder params
     
@@ -47,16 +44,13 @@ class MultipageClassifier(nn.Module):
         self.tokenizer = MBartTokenizer.from_pretrained("facebook/mbart-large-en-ro")
 
         page_encoder = SwinEncoder(
-            patch_size=self.config.patch_size,
-            embed_dim=self.config.embed_dim,
-            depths=self.config.depths,
-            num_heads=self.config.num_heads,
-            window_size=self.config.window_size,
+            **self.config.encoder_cfg.dict()
         )
-        self.encoder = MultipageEncoder(page_encoder)
+        self.encoder = MultipageEncoder(page_encoder, self.config.max_pages)
 
         sep_config = DocumentSeparatorConfig(
             embedding_size=self.encoder.hidden_dim,
+            num_classes=self.config.num_classes,
             max_pages=self.config.max_pages
         )
         self.separator = DocumentSeparator(
@@ -64,18 +58,17 @@ class MultipageClassifier(nn.Module):
         )
 
 
-    def forward(self, pixel_values: torch.Tensor):
+    def forward(self, pixel_values: torch.Tensor) -> dict[str, torch.Tensor]:
         encoder_outputs = self.encoder(pixel_values) # TODO do this for every item in Batch
-        
-        pred = self.separator(
+        preds = self.separator(
             encoder_outputs
         )
-        return pred
+        return preds
 
     def predict(self, pixel_values: torch.Tensor):
-        pred = self.forward(pixel_values)
-        pred = self.separator.postprocess(pred)
-        return pred
+        preds = self.forward(pixel_values)
+        preds = self.separator.postprocess(preds)
+        return preds
 
     def prepare_input(self, img: Image.Image, random_padding: bool = False, align_long_axis = False) -> torch.Tensor:
         img = img.convert("RGB")
