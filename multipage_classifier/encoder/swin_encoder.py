@@ -1,160 +1,80 @@
-from functools import partial
-from typing import Callable, List, Optional
+from typing import cast
 
+import numpy as np
 import torch
 import torch.nn as nn
+from PIL import Image, ImageOps
 from pydantic import BaseModel
-from torchvision.models.swin_transformer import (PatchMerging, Permute,
-                                                 SwinTransformerBlock,
-                                                 SwinTransformerBlockV2)
+from torchvision import transforms
+
+from torchvision.transforms.functional import resize, rotate
+from transformers.models.swin import SwinConfig, SwinModel
+from transformers.models.swinv2 import Swinv2Model
 
 
 class SwinEncoderConfig(BaseModel):
-    patch_size: List[int]
-    embed_dim: int
-    depths: List[int]
-    num_heads: List[int]
-    window_size: List[int]
-
+    image_size: tuple[int, int]
+    pretrained_model_name_or_path: str | None = None
+    # TODO custom params if no path is specified
 
 class SwinEncoder(nn.Module):
     """
-    Adapts pytorch's implementation of the Swin Transformer from the `"Swin Transformer: Hierarchical Vision Transformer using
-    Shifted Windows" <https://arxiv.org/pdf/2103.14030>`_ paper.
-    Args:
-        patch_size (List[int]): Patch size.
-        embed_dim (int): Patch embedding dimension.
-        depths (List(int)): Depth of each Swin Transformer layer.
-        num_heads (List(int)): Number of attention heads in different layers.
-        window_size (List[int]): Window size.
-        mlp_ratio (float): Ratio of mlp hidden dim to embedding dim. Default: 4.0.
-        dropout (float): Dropout rate. Default: 0.0.
-        attention_dropout (float): Attention dropout rate. Default: 0.0.
-        stochastic_depth_prob (float): Stochastic depth rate. Default: 0.1.
-        num_classes (int): Number of classes for classification head. Default: 1000.
-        block (nn.Module, optional): SwinTransformer Block. Default: None.
-        norm_layer (nn.Module, optional): Normalization layer. Default: None.
-        downsample_layer (nn.Module): Downsample layer (patch merging). Default: PatchMerging.
+    Wrapper for the transformers SwinModel.
     """
-
+    model: SwinModel
+    
     def __init__(
         self,
-        patch_size: List[int],
-        embed_dim: int,
-        depths: List[int],
-        num_heads: List[int],
-        window_size: List[int],
-        mlp_ratio: float = 4.0,
-        dropout: float = 0.0,
-        attention_dropout: float = 0.0,
-        stochastic_depth_prob: float = 0.1,
-        norm_layer: Optional[Callable[..., nn.Module]] = None,
-        block: Optional[Callable[..., nn.Module]] = None,
-        downsample_layer: Callable[..., nn.Module] = PatchMerging,
+        cfg: SwinEncoderConfig
     ):
         super().__init__()
 
-        if block is None:
-            block = SwinTransformerBlock
-        if norm_layer is None:
-            norm_layer = partial(nn.LayerNorm, eps=1e-5)
+        self.cfg = cfg
 
-        layers: List[nn.Module] = []
-        # split image into non-overlapping patches
-        layers.append(
-            nn.Sequential(
-                nn.Conv2d(
-                    3, embed_dim, kernel_size=(patch_size[0], patch_size[1]), stride=(patch_size[0], patch_size[1])
-                ),
-                Permute([0, 2, 3, 1]),
-                norm_layer(embed_dim),
-            )
+        if cfg.pretrained_model_name_or_path:
+            config = SwinConfig.from_pretrained(cfg.pretrained_model_name_or_path)
+            config.image_size = cfg.image_size
+            self.model = cast(SwinModel, SwinModel.from_pretrained(cfg.pretrained_model_name_or_path, config = config))
+        else:
+            self.model = SwinModel(SwinConfig(image_size=self.cfg.image_size)) # type: ignore
+
+        self.hidden_dim = self.model.num_features
+        
+
+    def forward(self, pixel_values: torch.Tensor, return_pooled_output: bool = True) -> torch.Tensor:
+        """
+        Args:
+            x: (batch_size, num_channels, height, width)
+        """
+        out = self.model(pixel_values)
+        if return_pooled_output:
+            return out.pooler_output
+        return out.last_hidden_state
+
+    def prepare_input(self, img: Image.Image, random_padding: bool = False, align_long_axis = False) -> torch.Tensor:
+        img = img.convert("RGB")
+        if align_long_axis and (
+            (self.model.config.image_size[1] > self.model.config.image_size[0] and img.width < img.height)
+            or (self.model.config.image_size[1] < self.model.config.image_size[0] and img.width > img.height)
+        ):
+            img = rotate(img, angle=-90, expand=True) # type: ignore
+        img = resize(img, min(self.model.config.image_size)) # type: ignore
+        img.thumbnail((self.model.config.image_size[1], self.model.config.image_size[0]))
+        delta_width = self.model.config.image_size[1] - img.width
+        delta_height = self.model.config.image_size[0] - img.height
+        if random_padding:
+            pad_width = np.random.randint(low=0, high=delta_width + 1)
+            pad_height = np.random.randint(low=0, high=delta_height + 1)
+        else:
+            pad_width = delta_width // 2
+            pad_height = delta_height // 2
+        padding = (
+            pad_width,
+            pad_height,
+            delta_width - pad_width,
+            delta_height - pad_height,
         )
 
-        total_stage_blocks = sum(depths)
-        stage_block_id = 0
-        # build SwinTransformer blocks
-        for i_stage in range(len(depths)):
-            stage: List[nn.Module] = []
-            dim = embed_dim * 2**i_stage
-            for i_layer in range(depths[i_stage]):
-                # adjust stochastic depth probability based on the depth of the stage block
-                sd_prob = stochastic_depth_prob * float(stage_block_id) / (total_stage_blocks - 1)
-                stage.append(
-                    block(
-                        dim,
-                        num_heads[i_stage],
-                        window_size=window_size,
-                        shift_size=[0 if i_layer % 2 == 0 else w // 2 for w in window_size],
-                        mlp_ratio=mlp_ratio,
-                        dropout=dropout,
-                        attention_dropout=attention_dropout,
-                        stochastic_depth_prob=sd_prob,
-                        norm_layer=norm_layer,
-                    )
-                )
-                stage_block_id += 1
-            layers.append(nn.Sequential(*stage))
-            # add patch merging layer
-            if i_stage < (len(depths) - 1):
-                layers.append(downsample_layer(dim, norm_layer))
-        self.features = nn.Sequential(*layers)
+        pixel_values = transforms.ToTensor()(ImageOps.expand(img, padding))
 
-        self.hidden_dim = embed_dim * 2 ** (len(depths) - 1)
-        self.norm = norm_layer(self.hidden_dim)
-        self.permute = Permute([0, 3, 1, 2])
-        self.avgpool = nn.AdaptiveAvgPool2d(1)
-        self.flatten = nn.Flatten(1)
-
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.trunc_normal_(m.weight, std=0.02)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-
-    def forward(self, pixel_values) -> torch.Tensor:
-        x = self.features(pixel_values)
-        x = self.norm(x)
-        x = self.permute(x)
-        x = self.avgpool(x)
-        x = self.flatten(x)
-        return x
-
-
-def swin_tiny_cfg():
-    return SwinEncoderConfig(
-        patch_size=[4, 4],
-        embed_dim=96,
-        depths=[2, 2, 6, 2],
-        num_heads=[3, 6, 12, 24],
-        window_size=[7, 7]
-    )
-
-def swin_small_cfg():
-    return SwinEncoderConfig(
-        patch_size=[4, 4],
-        embed_dim=96,
-        depths=[2, 2, 18, 2],
-        num_heads=[3, 6, 12, 24],
-        window_size=[7, 7],
-    )
-
-def swin_base_cfg():
-    return SwinEncoderConfig(
-        patch_size=[4, 4],
-        embed_dim=128,
-        depths=[2, 2, 18, 2],
-        num_heads=[4, 8, 16, 32],
-        window_size=[7, 7],
-    )
-
-def swin_donut_cfg():
-    return SwinEncoderConfig(
-        patch_size=[4, 4],
-        embed_dim=128,
-        depths=[2, 2, 14, 2],
-        num_heads=[4, 8, 16, 32],
-        window_size=[10,10],
-    )
-
-# TODO swin v2 ? Pretrained weights ?
+        return pixel_values

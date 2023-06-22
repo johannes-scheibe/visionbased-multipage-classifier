@@ -1,9 +1,10 @@
 
 from inspect import signature
-from typing import Any
+from typing import Any, cast
 
 import torch
-from multipage_classifier.encoder.swin_encoder import SwinEncoder, SwinEncoderConfig
+from multipage_classifier.encoder.swin_encoder import (SwinEncoder,
+                                                       SwinEncoderConfig)
 from utils.lightning import BaseLightningModule
 
 ORDER_NAMES = ["None", "Pred", "Succ", "Same"]
@@ -11,19 +12,17 @@ ORDER_NAMES = ["None", "Pred", "Succ", "Same"]
 class SwinEncoderPLModule(BaseLightningModule):
     encoder: SwinEncoder
 
-    def __init__(self, config: SwinEncoderConfig):
+    def __init__(self, cfg: SwinEncoderConfig):
         super().__init__()
         
         self.save_hyperparameters()
 
-        self.encoder = SwinEncoder(**config.dict())
-
-        self.hidden_dim = self.encoder.hidden_dim
+        self.encoder: SwinEncoder = SwinEncoder(cfg)
 
         self.model_input_keys = list(signature(self.encoder.forward).parameters.keys())
 
         self.order_head = torch.nn.Sequential(
-            torch.nn.Linear(self.hidden_dim * 2, len(ORDER_NAMES)),
+            torch.nn.Linear(self.encoder.hidden_dim * 2, len(ORDER_NAMES)),
             torch.nn.ReLU(),
             torch.nn.Linear(len(ORDER_NAMES), len(ORDER_NAMES))
         )
@@ -47,7 +46,7 @@ class SwinEncoderPLModule(BaseLightningModule):
         # Compute order head input
         bs = len(emb)
         diff = emb.unsqueeze(0).repeat(bs, 1, 1)
-        diff = torch.cat([diff, diff.permute(1, 0, 2)], -1).view(-1, self.hidden_dim * 2)
+        diff = torch.cat([diff, diff.permute(1, 0, 2)], -1).view(-1, self.encoder.hidden_dim * 2)
         
         # Compute the prediction
         pred = {} 
