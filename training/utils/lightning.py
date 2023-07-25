@@ -161,6 +161,7 @@ class BaseLightningModule(pl.LightningModule):
             on_epoch=True,
             prog_bar=True,
             logger=True,
+            sync_dist=True
         )
 
         return losses
