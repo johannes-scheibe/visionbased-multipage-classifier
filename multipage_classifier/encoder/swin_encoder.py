@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Type, cast
 
 import numpy as np
 import torch
@@ -8,20 +8,19 @@ from pydantic import BaseModel
 from torchvision import transforms
 
 from torchvision.transforms.functional import resize, rotate
-from transformers.models.swin import SwinConfig, SwinModel
-from transformers.models.swinv2 import Swinv2Model
-
+from transformers import AutoConfig, DonutSwinModel, Swinv2Model, SwinModel
 
 class SwinEncoderConfig(BaseModel):
     image_size: tuple[int, int]
-    pretrained_model_name_or_path: str | None = None
+    pretrained_model_name_or_path: str
+    pretrained_model_type: Type[SwinModel] | Type[Swinv2Model] | Type[DonutSwinModel] = SwinModel
+
     # TODO custom params if no path is specified
 
 class SwinEncoder(nn.Module):
     """
     Wrapper for the transformers SwinModel.
     """
-    model: SwinModel
     
     def __init__(
         self,
@@ -30,14 +29,11 @@ class SwinEncoder(nn.Module):
         super().__init__()
 
         self.cfg = cfg
-
-        if cfg.pretrained_model_name_or_path:
-            config = SwinConfig.from_pretrained(cfg.pretrained_model_name_or_path)
-            config.image_size = cfg.image_size
-            self.model = cast(SwinModel, SwinModel.from_pretrained(cfg.pretrained_model_name_or_path, config = config))
-        else:
-            self.model = SwinModel(SwinConfig(image_size=self.cfg.image_size)) # type: ignore
-
+        
+        config = AutoConfig.from_pretrained(self.cfg.pretrained_model_name_or_path)
+        config.image_size = cfg.image_size
+        self.model = cast(self.cfg.pretrained_model_type, self.cfg.pretrained_model_type.from_pretrained(cfg.pretrained_model_name_or_path, config=config))
+        
         self.hidden_dim = self.model.num_features
         
 
