@@ -1,19 +1,20 @@
+from typing import cast
 import torch
 import torch.nn as nn
 
 from multipage_classifier.encoder.swin_encoder import SwinEncoder
 
-class MultipageEncoder(nn.Module):
 
+class MultipageEncoder(nn.Module):
     def __init__(
         self,
-        encoder: SwinEncoder, # TODO support general encoders
+        encoder: SwinEncoder,  # TODO support general encoders
         max_pages: int,
     ):
         super().__init__()
 
         self.page_encoder = encoder
-        
+
         self.hidden_dim: int = self.page_encoder.hidden_dim
 
         self.pos_embedding_layer = nn.Embedding(
@@ -24,16 +25,15 @@ class MultipageEncoder(nn.Module):
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=3)
 
-        
-
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        page_embeddings = self.page_encoder(pixel_values) # TODO calc batchwise
+        page_embeddings = self.page_encoder.forward(pixel_values)
 
         pos_embedding = self.pos_embedding_layer(
             torch.arange(0, len(page_embeddings), device=page_embeddings.device)
         )
 
-        document_embeddings = self.transformer_encoder(page_embeddings.unsqueeze(0) + pos_embedding.unsqueeze(0))
+        document_embeddings = self.transformer_encoder(
+            page_embeddings.unsqueeze(0) + pos_embedding.unsqueeze(0)
+        )
 
         return document_embeddings.view(-1, self.hidden_dim)
-        

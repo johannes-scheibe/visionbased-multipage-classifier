@@ -13,12 +13,17 @@ from transformers import MBartConfig, MBartForCausalLM, MBartTokenizer
 
 
 class MultipageTransformerConfig(BaseModel):
+    class Config:
+        arbitrary_types_allowed = True
+        
     input_size: tuple[int, int] = (2560, 1920)
     max_pages: int = 64
     max_seq_len: int = 768
 
-    encoder_cfg: SwinEncoderConfig
+    encoder_cfg: SwinEncoderConfig | None = None
+    pretrained_encoder: str | None = None
 
+    decoder_cfg: MBartConfig
 
 class MultipageTransformer(nn.Module):
     def __init__(self, config: MultipageTransformerConfig):
@@ -33,12 +38,21 @@ class MultipageTransformer(nn.Module):
             ]
         )
 
-        page_encoder = SwinEncoder(self.config.encoder_cfg)
+        assert self.config.pretrained_encoder or self.config.encoder_cfg
+
+        if self.config.pretrained_encoder:
+            page_encoder = torch.load(self.config.pretrained_encoder)
+        else:
+            page_encoder = SwinEncoder(
+                config.encoder_cfg # type: ignore
+            )
+
         self.encoder = MultipageEncoder(page_encoder, self.config.max_pages)
+
 
         self.tokenizer = MBartTokenizer.from_pretrained("facebook/mbart-large-en-ro")
 
-        self.decoder = MBartDecoder(config=MBartConfig(d_model=768))
+        self.decoder = MBartDecoder(config=self.config.decoder_cfg)
 
     def forward(
         self,
@@ -71,7 +85,7 @@ class MultipageTransformer(nn.Module):
             prompt_tensors: (1, sequence_length)
                 convert image to tensor if prompt_tensor is not fed
         """
-        encoder_last_hidden_state = self.encoder(image_tensors[0])  # TODO see above
+        encoder_last_hidden_state = self.encoder(image_tensors)  # TODO see above
 
         if len(encoder_last_hidden_state.size()) == 1:
             encoder_last_hidden_state = encoder_last_hidden_state.unsqueeze(0)
@@ -90,7 +104,7 @@ class MultipageTransformer(nn.Module):
             num_beams=1,
             bad_words_ids=[[self.tokenizer.unk_token_id]],
         )
-
+        
         output = {"predictions": list()}
         for seq in self.tokenizer.batch_decode(decoder_output):
             seq = seq.replace(self.tokenizer.eos_token, "").replace(
@@ -129,7 +143,7 @@ class MultipageTransformer(nn.Module):
         obj: Any,
         update_special_tokens_for_json_key: bool = True,
         sort_json_key: bool = True,
-    ):
+    ) -> str:
         """
         Convert an ordered JSON object into a token sequence
         """

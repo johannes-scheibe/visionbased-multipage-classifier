@@ -5,42 +5,32 @@ import random
 from pathlib import Path
 from typing import Any, Dict, List
 
+from multipage_classifier.datasets.utils import Bucket
+
 import pytorch_lightning as pl
-import torch
-from pydantic import BaseModel
+
 from torch.utils.data import DataLoader, Dataset, default_collate
 from PIL import Image
-from enum import Enum
 
-
-class Page(BaseModel):
-    class Config:
-        arbitrary_types_allowed = True
-
-    input_ids: torch.Tensor
-    attention_mask: torch.Tensor
-    letter_id: int
-    doc_class: int
-    doc_id: int
-    page_nr: int
-
-class Bucket(Enum):
-    Training = "training"
-    Validation = "validation"
-    Testing = "testing"
 
 class MosaicDataset(Dataset):
-
     sample_info_file_name: str = "sample.json"
-    
-    def __init__(self, path: Path, bucket: Bucket, classes: list, max_pages: int, prepare_function):
+
+    def __init__(
+        self,
+        path: Path,
+        bucket: Bucket,
+        classes: list,
+        max_pages: int,
+        prepare_function,
+    ):
         super().__init__()
 
         self.path = path
         self.bucket = bucket
 
         self.prepare_function = prepare_function
-        
+
         with (self.path / f"{bucket.value}.txt").open("r") as file:
             self.inventory = [Path(line.rstrip()) for line in file.readlines()]
 
@@ -52,45 +42,47 @@ class MosaicDataset(Dataset):
 
     def __len__(self):
         return len(self.inventory)
-    
+
     def __getitem__(self, idx: int):
         letter_id = idx
-        
+
         sample_path = self.path / self.inventory[idx]
-        sample_data = (
-            {
-                path.name: path.read_bytes()
-                for path in sample_path.iterdir()
-                if path.is_file() and path.name != self.sample_info_file_name
-            }
-        )
-        
+        sample_data = {
+            path.name: path.read_bytes()
+            for path in sample_path.iterdir()
+            if path.is_file() and path.name != self.sample_info_file_name
+        }
+
         document = json.loads(sample_data["document.json"].decode())
-        
-        best_candidate = max(document["prediction"]["candidates"], key=lambda c: c["score"])
+
+        best_candidate = max(
+            document["prediction"]["candidates"], key=lambda c: c["score"]
+        )
         assert len(best_candidate["documents"]) > 0 and len(document["pages"]) > 0
 
         batch = []
-        
+
         for doc_id, predicted_doc in enumerate(best_candidate["documents"]):
             class_identifier = str(
-                Path(predicted_doc["documentClass"]).relative_to(document["documentClass"])
+                Path(predicted_doc["documentClass"]).relative_to(
+                    document["documentClass"]
+                )
             )
             if class_identifier not in self.classes:
                 raise ValueError(
                     f"Prediction contains invalid class identifier: {class_identifier}"
                 )
-            
+
             pages = predicted_doc["pages"]
             if len(pages) == 0:
-                pages = [{"sourcePage":i} for i in range(len(document["pages"]))]
+                pages = [{"sourcePage": i} for i in range(len(document["pages"]))]
 
             doc = []
-            for dst_page, page in enumerate(pages[:self.max_pages]):
-                src_page = page.get("sourcePage", 0) # NOTE the default value is 0
+            for dst_page, page in enumerate(pages[: self.max_pages]):
+                src_page = page.get("sourcePage", 0)  # NOTE the default value is 0
                 page_bytes = sample_data[f"page_{src_page}.png"]
                 img = Image.open(io.BytesIO(page_bytes))
-                
+
                 page = {
                     "pixel_values": self.prepare_function(img),
                     "letter_id": letter_id,
@@ -101,12 +93,18 @@ class MosaicDataset(Dataset):
                 doc.append(page)
             batch.append(doc)
 
-        return batch[:self.max_pages]
+        return batch[: self.max_pages]
 
 
 class MosaicDataModule(pl.LightningDataModule):
     def __init__(
-        self, path: Path, classes, prepare_function, batch_size=1, num_workers: int = 0, max_pages: int = 64
+        self,
+        path: Path,
+        classes,
+        prepare_function,
+        batch_size=1,
+        num_workers: int = 0,
+        max_pages: int = 64,
     ):
         super().__init__()
         self.batch_size = batch_size
@@ -119,13 +117,25 @@ class MosaicDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         self.train_dataset = MosaicDataset(
-            self.path, Bucket.Training, self.classes, self.max_pages, self.prepare_function
+            self.path,
+            Bucket.Training,
+            self.classes,
+            self.max_pages,
+            self.prepare_function,
         )
         self.val_dataset = MosaicDataset(
-            self.path, Bucket.Validation, self.classes, self.max_pages, self.prepare_function
+            self.path,
+            Bucket.Validation,
+            self.classes,
+            self.max_pages,
+            self.prepare_function,
         )
         self.test_dataset = MosaicDataset(
-            self.path, Bucket.Testing, self.classes, self.max_pages, self.prepare_function
+            self.path,
+            Bucket.Testing,
+            self.classes,
+            self.max_pages,
+            self.prepare_function,
         )
 
     def train_dataloader(self):
@@ -171,7 +181,9 @@ def window_shuffle(input_list, window_size=3, shuffle_percent=0.25):
     return input_list
 
 
-def collate(samples: List[List[List[dict]]], batch_size: int,  shuffle_mode="window"):  # "all", "none"
+def collate(
+    samples: List[List[List[dict]]], batch_size: int, shuffle_mode="window"
+):  # "all", "none"
     batch: List[dict] = []
     i = 0
     for sample in samples:

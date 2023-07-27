@@ -1,11 +1,5 @@
-"""
-Donut
-Copyright (c) 2022-present NAVER Corp.
-MIT License
-"""
-import json
+from functools import partial
 import math
-import random
 import re
 from pathlib import Path
 from typing import List
@@ -23,7 +17,8 @@ from multipage_classifier.multipage_transformer import (
     MultipageTransformer,
     MultipageTransformerConfig,
 )
-from multipage_classifier.datasets.transformer_dataset import TransformerDataset
+from multipage_classifier.datasets.transformer_dataset import Page, TransformerDataset
+from multipage_classifier.datasets.utils import Bucket
 
 
 class MultipageTransformerPLModule(BaseLightningModule):
@@ -36,17 +31,23 @@ class MultipageTransformerPLModule(BaseLightningModule):
 
         self.model = MultipageTransformer(config=self.config)
 
+        self.validation_step_outputs = []
+
     def training_step(self, batch, *args):
-        image_tensors = batch[0]
-        decoder_input_ids = batch[1][:, :-1]
-        decoder_labels = batch[2][:, 1:]
+        image_tensors = batch["pixel_values"]
+        decoder_input_ids = batch["decoder_input_ids"][:, :-1]
+        decoder_labels = batch["decoder_labels"][:, 1:].contiguous()
 
         loss = self.model(image_tensors, decoder_input_ids, decoder_labels)[0]
         self.log_dict({"train_loss": loss}, sync_dist=True)
         return loss
 
     def validation_step(self, batch, *args):
-        image_tensors, decoder_input_ids, prompt_end_idxs, answers = batch
+        image_tensors = batch["pixel_values"]
+        decoder_input_ids = batch["decoder_input_ids"]
+        prompt_end_idxs = batch["prompt_end_index"]
+        answers = batch["target_sequence"]
+
         decoder_prompts = pad_sequence(
             [
                 input_id[: end_idx + 1]
@@ -68,17 +69,17 @@ class MultipageTransformerPLModule(BaseLightningModule):
             answer = answer.replace(self.model.tokenizer.eos_token, "")
             scores.append(edit_distance(pred, answer) / max(len(pred), len(answer)))
 
+        self.validation_step_outputs.append(scores)
+
         return preds, answers, scores
 
-    def validation_epoch_end(self, validation_step_outputs):
-        cnt = 0
-        total_metric = 0
-        for _, _, scores in validation_step_outputs:
-            cnt += len(scores)
-            total_metric += np.sum(scores)
-        val_metric = total_metric / cnt
+    def on_validation_epoch_end(self):
+        cnt = sum(len(scores) for scores in self.validation_step_outputs)
+        val_metric = sum(np.sum(scores) for scores in self.validation_step_outputs)
 
-        self.log_dict({"val_metric": val_metric}, sync_dist=True)
+        self.log_dict({"val_metric": val_metric / cnt}, sync_dist=True)
+
+        self.validation_step_outputs.clear()  # free memory
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=3e-5)
@@ -99,58 +100,18 @@ class MultipageTransformerPLModule(BaseLightningModule):
 
 class MultipagePLDataModule(pl.LightningDataModule):
     def __init__(
-        self,
-        dataset_path,
-        ds_file,
-        model: MultipageTransformer,
-        split: list = [0.8, 0.2],
-        num_workers: int = 1,
+        self, dataset_path: Path, model: MultipageTransformer, num_workers: int = 0
     ):
         super().__init__()
         self.dataset_path = Path(dataset_path)
-        self.ds_file = ds_file
-
         self.model = model
-
-        assert (
-            math.fsum(split) == 1.0
-        ), f"{split} doesn't add up to 1 ({math.fsum(split)})"
-        assert len(split) in [
-            2,
-            3,
-        ], f"Length of {split} is not in [2, 3] ({len(split)})"
-        self.split = split
-
         self.num_workers = num_workers
-
-    def prepare_data(self):
-        labels = json.load(open(self.dataset_path / self.ds_file))["labels"]
-
-        self.classes = []
-        for l in labels:
-            if l["type"] not in self.classes:
-                self.classes.append(l["type"])
-
-        n = len(labels)
-        sizes = [int(n * p) for p in self.split]
-        slices = []
-        start = 0
-        for size in sizes:
-            end = start + size
-            slices.append(labels[start:end])
-            start = end
-
-        self.train_labels = slices[0]
-        self.val_labels = slices[1]
-        self.test_labels = slices[2] if len(slices) == 3 else slices[1]
 
     def setup(self, stage=None):
         self.train_dataset = TransformerDataset(
             self.dataset_path,
-            self.train_labels,
+            Bucket.Training,
             self.model,
-            self.model.config.max_pages,
-            self.model.config.max_seq_len,
             split="train",
             task_start_token="<s_test>",
             sort_json_key=False,
@@ -158,22 +119,18 @@ class MultipagePLDataModule(pl.LightningDataModule):
 
         self.val_dataset = TransformerDataset(
             self.dataset_path,
-            self.val_labels,
+            Bucket.Validation,
             self.model,
-            self.model.config.max_pages,
-            self.model.config.max_seq_len,
-            split="val",
+            split="train",
             task_start_token="<s_test>",
             sort_json_key=False,
         )
 
         self.test_dataset = TransformerDataset(
             self.dataset_path,
-            self.test_labels,
+            Bucket.Testing,
             self.model,
-            self.model.config.max_pages,
-            self.model.config.max_seq_len,
-            split="test",
+            split="train",
             task_start_token="<s_test>",
             sort_json_key=False,
         )
@@ -185,7 +142,9 @@ class MultipagePLDataModule(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=True,
-            # collate_fn=collate,
+            collate_fn=partial(
+                collate, max_pages_per_batch=self.model.config.max_pages
+            ),
         )
 
     def val_dataloader(self):
@@ -195,7 +154,9 @@ class MultipagePLDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
-            # collate_fn=collate,
+            collate_fn=partial(
+                collate, max_pages_per_batch=self.model.config.max_pages
+            ),
         )
 
     def test_dataloader(self):
@@ -205,5 +166,17 @@ class MultipagePLDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
-            # collate_fn=collate,
+            collate_fn=partial(
+                collate, max_pages_per_batch=self.model.config.max_pages
+            ),
         )
+
+
+def collate(samples: List[List[Page]], max_pages_per_batch: int, shuffle_mode="window"):
+    # offset = random.randint(0, max(0, (len(batch) - max_pages_per_batch))) NOTE: cant apply offset because this would require changes of the doc_ids for example
+
+    batch = [s.dict() for s in samples[0]]  # NOTE batch_size must be 1!!
+
+    ret = default_collate(batch[:max_pages_per_batch])
+
+    return ret
