@@ -26,14 +26,18 @@ class MultipageEncoder(nn.Module):
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=3)
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        page_embeddings = self.page_encoder.forward(pixel_values)
 
-        pos_embedding = self.pos_embedding_layer(
-            torch.arange(0, len(page_embeddings), device=page_embeddings.device)
-        )
+        embeddings = []
+        for px in pixel_values: # iterate over the batch and compute embs for each stack in batch
+            page_embeddings = self.page_encoder.forward(px)
 
-        document_embeddings = self.transformer_encoder(
-            page_embeddings.unsqueeze(0) + pos_embedding.unsqueeze(0)
-        )
+            pos_embeddings = self.pos_embedding_layer(
+                torch.arange(0, len(page_embeddings), device=page_embeddings.device)
+            )
+            document_embeddings = self.transformer_encoder(
+                page_embeddings.unsqueeze(0) + pos_embeddings.unsqueeze(0)
+            ).view(-1, self.hidden_dim).unsqueeze(0)
 
-        return document_embeddings.view(-1, self.hidden_dim)
+            embeddings.append(document_embeddings)
+
+        return torch.cat(embeddings)

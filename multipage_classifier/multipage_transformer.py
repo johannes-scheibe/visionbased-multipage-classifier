@@ -49,8 +49,7 @@ class MultipageTransformer(nn.Module):
 
         self.encoder = MultipageEncoder(page_encoder, self.config.max_pages)
 
-
-        self.tokenizer = MBartTokenizer.from_pretrained("facebook/mbart-large-en-ro")
+        self.tokenizer: MBartTokenizer = MBartTokenizer.from_pretrained("facebook/mbart-large-en-ro")
 
         self.decoder = MBartDecoder(config=self.config.decoder_cfg)
 
@@ -59,14 +58,15 @@ class MultipageTransformer(nn.Module):
         image_tensors: torch.Tensor,
         decoder_input_ids: torch.Tensor,
         decoder_labels: torch.Tensor,
-    ):
-        encoder_outputs = self.encoder(image_tensors)
+    ):  
+        encoder_outputs = self.encoder.forward(image_tensors)
 
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
             encoder_hidden_states=encoder_outputs,
             labels=decoder_labels,
-        )
+        )  
+
         return decoder_outputs
 
     def inference(
@@ -85,14 +85,14 @@ class MultipageTransformer(nn.Module):
             prompt_tensors: (1, sequence_length)
                 convert image to tensor if prompt_tensor is not fed
         """
-        encoder_last_hidden_state = self.encoder(image_tensors)  # TODO see above
+        encoder_last_hidden_state = self.encoder(image_tensors)
 
         if len(encoder_last_hidden_state.size()) == 1:
             encoder_last_hidden_state = encoder_last_hidden_state.unsqueeze(0)
         if len(prompt_tensors.size()) == 1:
             prompt_tensors = prompt_tensors.unsqueeze(0)
 
-        # get decoder output
+        # get decoder output 
         assert isinstance(self.decoder.model, MBartForCausalLM)
 
         decoder_output = self.decoder.model.generate(
@@ -124,16 +124,16 @@ class MultipageTransformer(nn.Module):
         """
         Add special tokens to tokenizer and resize the token embeddings of the decoder
         """
-        newly_added_num = self.tokenizer.add_tokens(list_of_tokens)
+        newly_added_num = self.tokenizer.add_tokens(list(list_of_tokens))
         if newly_added_num > 0:
             self.decoder.model.resize_token_embeddings(len(self.tokenizer))
 
-    def add_special_tokens(self, list_of_tokens: list[str]):
+    def add_special_tokens(self, tokens: dict[str, str]):
         """
         Add special tokens to tokenizer and resize the token embeddings
         """
         newly_added_num = self.tokenizer.add_special_tokens(
-            {"additional_special_tokens": sorted(set(list_of_tokens))}
+            dict(tokens)
         )
         if newly_added_num > 0:
             self.decoder.model.resize_token_embeddings(len(self.tokenizer))
@@ -158,7 +158,7 @@ class MultipageTransformer(nn.Module):
                     keys = obj.keys()
                 for k in keys:
                     if update_special_tokens_for_json_key:
-                        self.add_special_tokens([rf"<s_{k}>", rf"</s_{k}>"])
+                        self.add_tokens([rf"<s_{k}>", rf"</s_{k}>"])
                     output += (
                         rf"<s_{k}>"
                         + self.json2token(

@@ -17,7 +17,7 @@ from torch.utils.data import Dataset
 
 added_tokens = []
 
-class Page(BaseModel):
+class TransformerSample(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
@@ -26,6 +26,7 @@ class Page(BaseModel):
     prompt_end_index: torch.Tensor
     decoder_labels: torch.Tensor
     target_sequence: str
+    ground_truth: list[dict]
 
 class TransformerDataset(Dataset):
     sample_info_file_name: str = "sample.json"
@@ -42,7 +43,6 @@ class TransformerDataset(Dataset):
         sort_json_key: bool = True,
     ):
         super().__init__()
-
 
         self.path = path
         self.bucket = bucket
@@ -73,10 +73,9 @@ class TransformerDataset(Dataset):
         added_tokens.extend(list_of_tokens)
 
     def __len__(self):
-        return 50
         return len(self.inventory)
 
-    def __getitem__(self, idx: int) -> list[Page]:
+    def __getitem__(self, idx: int) -> TransformerSample:
         sample_path = self.path / self.inventory[idx]
         sample_data = {
             path.name: path.read_bytes()
@@ -91,9 +90,12 @@ class TransformerDataset(Dataset):
         )
         assert len(best_candidate["documents"]) > 0 and len(document["pages"]) > 0
 
-        batch = []
+        page_tensors: list[torch.Tensor] = []
+        ground_truth = []
 
         for doc_id, predicted_doc in enumerate(best_candidate["documents"]):
+            
+
             class_identifier = str(
                 Path(predicted_doc["documentClass"]).relative_to(
                     document["documentClass"]
@@ -110,52 +112,61 @@ class TransformerDataset(Dataset):
                 
                 img = Image.open(io.BytesIO(page_bytes))
                 
-                pixel_values: torch.Tensor = self.model.encoder.page_encoder.prepare_input(
+                page_tensors.append(self.model.encoder.page_encoder.prepare_input(
                     img, self.bucket == Bucket.Training
-                ).squeeze()
+                ).unsqueeze(0))
 
-                ground_truth = {
+                ground_truth.append({
                         "doc_id": doc_id,
                         "doc_class": class_identifier,
                         "page_nr": dst_page,
                     }
-                
-                target_sequence = (
-                    self.task_start_token
-                    + self.model.json2token(
-                        ground_truth,
-                        sort_json_key=self.sort_json_key,
-                        update_special_tokens_for_json_key=False
-                    )
-                    + self.model.tokenizer.eos_token
                 )
+        
+        # TODO offset and stuff
+        page_tensors = page_tensors[:self.model.config.max_pages]
+        ground_truth = ground_truth[:self.model.config.max_pages]
 
-                input_ids: torch.Tensor = self.model.tokenizer(
-                    target_sequence,
-                    add_special_tokens=False,
-                    max_length=self.model.decoder.model.config.max_length,  # type: ignore
-                    padding="max_length",
-                    truncation=True,
-                    return_tensors="pt",
-                )["input_ids"]  # type: ignore
-                input_ids = input_ids.squeeze(0)
+        pixel_values = torch.cat(page_tensors)
 
-                labels = input_ids.clone()
-                labels[
-                    labels == self.model.tokenizer.pad_token_id
-                ] = self.ignore_id  # model doesn't need to predict pad token
-                labels[
-                    : torch.nonzero(labels == self.prompt_end_token_id).sum() + 1
-                ] = self.ignore_id  # model doesn't need to predict prompt (for VQA)
+        target_sequence = (
+            self.task_start_token
+            + self.model.json2token(
+                ground_truth,
+                sort_json_key=self.sort_json_key,
+                update_special_tokens_for_json_key=False
+            )
+            + self.model.tokenizer.eos_token
+        )
 
-                prompt_end_index = torch.nonzero(input_ids == self.prompt_end_token_id).sum()
-                
-                batch.append(Page(
-                    pixel_values=pixel_values,
-                    decoder_input_ids=input_ids,
-                    prompt_end_index=prompt_end_index,
-                    decoder_labels=labels,
-                    target_sequence=target_sequence
-                ))
+        input_ids: torch.Tensor = self.model.tokenizer(
+            target_sequence,
+            add_special_tokens=False,
+            max_length=self.model.decoder.model.config.max_position_embeddings,  # type: ignore
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )["input_ids"]  # type: ignore
+        input_ids = input_ids.squeeze(0)
 
-        return batch
+        labels = input_ids.clone()
+        labels[
+            labels == self.model.tokenizer.pad_token_id
+        ] = self.ignore_id  # model doesn't need to predict pad token
+        labels[
+            : torch.nonzero(labels == self.prompt_end_token_id).sum() + 1
+        ] = self.ignore_id  # model doesn't need to predict prompt (for VQA)
+
+        
+        prompt_end_index = torch.nonzero(input_ids == self.prompt_end_token_id).sum()
+        
+        return TransformerSample(
+            pixel_values=pixel_values,
+            decoder_input_ids=input_ids,
+            prompt_end_index=prompt_end_index,
+            decoder_labels=labels,
+            target_sequence=target_sequence,
+            ground_truth=ground_truth
+        )
+
+        

@@ -17,7 +17,7 @@ from multipage_classifier.multipage_transformer import (
     MultipageTransformer,
     MultipageTransformerConfig,
 )
-from multipage_classifier.datasets.transformer_dataset import Page, TransformerDataset
+from multipage_classifier.datasets.transformer_dataset import TransformerSample, TransformerDataset
 from multipage_classifier.datasets.utils import Bucket
 
 
@@ -36,7 +36,7 @@ class MultipageTransformerPLModule(BaseLightningModule):
     def training_step(self, batch, *args):
         image_tensors = batch["pixel_values"]
         decoder_input_ids = batch["decoder_input_ids"][:, :-1]
-        decoder_labels = batch["decoder_labels"][:, 1:].contiguous()
+        decoder_labels = batch["decoder_labels"][:, 1:]
 
         loss = self.model(image_tensors, decoder_input_ids, decoder_labels)[0]
         self.log_dict({"train_loss": loss}, sync_dist=True)
@@ -142,9 +142,7 @@ class MultipagePLDataModule(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=partial(
-                collate, max_pages_per_batch=self.model.config.max_pages
-            ),
+            collate_fn=collate
         )
 
     def val_dataloader(self):
@@ -154,9 +152,7 @@ class MultipagePLDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=partial(
-                collate, max_pages_per_batch=self.model.config.max_pages
-            ),
+            collate_fn=collate
         )
 
     def test_dataloader(self):
@@ -166,17 +162,15 @@ class MultipagePLDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=partial(
-                collate, max_pages_per_batch=self.model.config.max_pages
-            ),
+            collate_fn=collate
         )
 
 
-def collate(samples: List[List[Page]], max_pages_per_batch: int, shuffle_mode="window"):
+def collate(samples: List[TransformerSample]):
     # offset = random.randint(0, max(0, (len(batch) - max_pages_per_batch))) NOTE: cant apply offset because this would require changes of the doc_ids for example
 
-    batch = [s.dict() for s in samples[0]]  # NOTE batch_size must be 1!!
+    batch = [s.dict() for s in samples]
 
-    ret = default_collate(batch[:max_pages_per_batch])
+    ret = default_collate(batch)
 
     return ret
