@@ -15,7 +15,6 @@ from PIL import Image
 from torch.utils.data import Dataset
 
 
-added_tokens = []
 
 class TransformerSample(BaseModel):
     class Config:
@@ -38,7 +37,7 @@ class TransformerDataset(Dataset):
 
         split: str = "train",
         ignore_id: int = -100,
-        task_start_token: str = "<s>",
+        task_start_token: str = "<s_cls>",
         prompt_end_token: str | None = None,
         sort_json_key: bool = True,
     ):
@@ -60,17 +59,13 @@ class TransformerDataset(Dataset):
         )
         self.sort_json_key = sort_json_key
 
-        self.add_tokens([self.task_start_token, self.prompt_end_token])
-        # TODO dont hard code the tokens here
-        self.add_tokens([rf"<s_{k}>" for k in ["doc_id", "doc_class", "page_nr"]])
-        self.add_tokens([rf"</s_{k}>" for k in ["doc_id", "doc_class", "page_nr"]])
-        self.prompt_end_token_id = model.tokenizer.convert_tokens_to_ids(
+        # self.model.decoder.add_special_tokens([self.task_start_token, self.prompt_end_token])
+        # # TODO dont hard code the tokens here
+        # self.model.decoder.add_special_tokens([rf"<s_{k}>" for k in ["doc_id", "doc_class", "page_nr"]])
+        # self.model.decoder.add_special_tokens([rf"</s_{k}>" for k in ["doc_id", "doc_class", "page_nr"]])
+        self.prompt_end_token_id = model.decoder.tokenizer.convert_tokens_to_ids(
             self.prompt_end_token
         )
-
-    def add_tokens(self, list_of_tokens: List[str]):
-        self.model.add_tokens(list_of_tokens)
-        added_tokens.extend(list_of_tokens)
 
     def __len__(self):
         return len(self.inventory)
@@ -136,10 +131,10 @@ class TransformerDataset(Dataset):
                 sort_json_key=self.sort_json_key,
                 update_special_tokens_for_json_key=False
             )
-            + self.model.tokenizer.eos_token
+            + self.model.decoder.tokenizer.eos_token
         )
 
-        input_ids: torch.Tensor = self.model.tokenizer(
+        input_ids: torch.Tensor = self.model.decoder.tokenizer(
             target_sequence,
             add_special_tokens=False,
             max_length=self.model.decoder.model.config.max_position_embeddings,  # type: ignore
@@ -151,7 +146,7 @@ class TransformerDataset(Dataset):
 
         labels = input_ids.clone()
         labels[
-            labels == self.model.tokenizer.pad_token_id
+            labels == self.model.decoder.tokenizer.pad_token_id
         ] = self.ignore_id  # model doesn't need to predict pad token
         labels[
             : torch.nonzero(labels == self.prompt_end_token_id).sum() + 1

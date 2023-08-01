@@ -1,8 +1,15 @@
 from typing import cast
+from pydantic import BaseModel
 import torch
 import torch.nn as nn
 
 from multipage_classifier.encoder.swin_encoder import SwinEncoder
+
+class EncoderOutput(BaseModel):
+    class Config:
+        arbitrary_types_allowed = True
+        
+    last_hidden_state: torch.Tensor
 
 
 class MultipageEncoder(nn.Module):
@@ -25,7 +32,7 @@ class MultipageEncoder(nn.Module):
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=3)
 
-    def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
+    def forward(self, pixel_values: torch.Tensor) -> EncoderOutput:
 
         embeddings = []
         for px in pixel_values: # iterate over the batch and compute embs for each stack in batch
@@ -40,4 +47,6 @@ class MultipageEncoder(nn.Module):
 
             embeddings.append(document_embeddings)
 
-        return torch.cat(embeddings)
+        return EncoderOutput(
+            last_hidden_state=torch.cat(embeddings),
+        )

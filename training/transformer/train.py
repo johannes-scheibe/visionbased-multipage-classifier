@@ -19,30 +19,37 @@ CLASS_PATH = "/data/training/master_thesis/datasets/bzuf_classes.json"
 LIGHTNING_PATH = "/data/training/master_thesis/lightning_logs"
 
 
-N_EPOCHS = 2
-MAX_PAGES = 8
+N_EPOCHS = 30
+MAX_PAGES = 16
 NUM_WORKERS = 1
 
+TASK_PROMPT = "<s_classification>"
 IMAGE_SIZE  = (420, 360)
 PRETRAINED_ENCODER = "/data/training/master_thesis/models/swin-encoder-tiny/model.bin"
 
 MAX_LENGTH = 768
 
 
+special_tokens = [TASK_PROMPT]
+for k in ["doc_id", "doc_class", "page_nr"]:
+    special_tokens.extend([rf"<s_{k}>", rf"</s_{k}>"])
 
 # Define Model
 config = MultipageTransformerConfig(
-    
     max_pages=MAX_PAGES,
     input_size=IMAGE_SIZE,
     pretrained_encoder=PRETRAINED_ENCODER,
 
-    decoder_cfg=MBartConfig(d_model=768)
+    special_tokens=special_tokens
 )
 
 model = MultipageTransformerPLModule(config)
+    
+data_module = MultipagePLDataModule(Path(DATASET_PATH), model.model,  task_prompt=TASK_PROMPT, num_workers=NUM_WORKERS) 
 
-data_module = MultipagePLDataModule(Path(DATASET_PATH), model.model, num_workers=NUM_WORKERS)
+data_module.prepare_data()
+data_module.setup() # ensure tokens are configured 
+# TODO maybe move tokens to model config 
 
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -62,12 +69,10 @@ logger = TensorBoardLogger(LIGHTNING_PATH, name=NAME)
 
 trainer = pl.Trainer(
     accelerator="gpu",
-    devices=[0],
+    devices=[1],
     logger=logger,
     max_epochs=N_EPOCHS,
     callbacks=[checkpoint_callback]
 )
 
 trainer.fit(model, data_module)
-
-torch.save(model, Path(LIGHTNING_PATH) / "last_model.ckpt")

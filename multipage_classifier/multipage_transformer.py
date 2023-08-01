@@ -4,13 +4,11 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from multipage_classifier.decoder.bart_decoder import MBartDecoder
 from multipage_classifier.encoder.multipage_encoder import MultipageEncoder
 from multipage_classifier.encoder.swin_encoder import SwinEncoder, SwinEncoderConfig
 from pydantic import BaseModel
 from torchvision import transforms
-from transformers import MBartConfig, MBartForCausalLM, MBartTokenizer
-
+from multipage_classifier.decoder.donut_decoder import BARTDecoder
 
 class MultipageTransformerConfig(BaseModel):
     class Config:
@@ -23,7 +21,11 @@ class MultipageTransformerConfig(BaseModel):
     encoder_cfg: SwinEncoderConfig | None = None
     pretrained_encoder: str | None = None
 
-    decoder_cfg: MBartConfig
+    max_position_embeddings: int | None = None
+    decoder_layer: int = 4
+    decoder_name_or_path: str | None = None
+    special_tokens: list[str] = []
+
 
 class MultipageTransformer(nn.Module):
     def __init__(self, config: MultipageTransformerConfig):
@@ -49,10 +51,12 @@ class MultipageTransformer(nn.Module):
 
         self.encoder = MultipageEncoder(page_encoder, self.config.max_pages)
 
-        self.tokenizer: MBartTokenizer = MBartTokenizer.from_pretrained("facebook/mbart-large-en-ro")
-
-        self.decoder = MBartDecoder(config=self.config.decoder_cfg)
-
+        self.decoder = BARTDecoder(
+            max_position_embeddings=self.config.max_seq_len if self.config.max_position_embeddings is None else self.config.max_position_embeddings,
+            decoder_layer=self.config.decoder_layer,
+            special_tokens=self.config.special_tokens,
+            name_or_path=self.config.decoder_name_or_path,
+        )
     def forward(
         self,
         image_tensors: torch.Tensor,
@@ -63,9 +67,9 @@ class MultipageTransformer(nn.Module):
 
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=encoder_outputs,
+            encoder_hidden_states=encoder_outputs.last_hidden_state,
             labels=decoder_labels,
-        )  
+        ) 
 
         return decoder_outputs
 
@@ -85,30 +89,32 @@ class MultipageTransformer(nn.Module):
             prompt_tensors: (1, sequence_length)
                 convert image to tensor if prompt_tensor is not fed
         """
-        encoder_last_hidden_state = self.encoder(image_tensors)
+        encoder_outputs = self.encoder.forward(image_tensors)
 
-        if len(encoder_last_hidden_state.size()) == 1:
-            encoder_last_hidden_state = encoder_last_hidden_state.unsqueeze(0)
+        if len(encoder_outputs.last_hidden_state.size()) == 1:
+            encoder_outputs.last_hidden_state = encoder_outputs.last_hidden_state.unsqueeze(0)
         if len(prompt_tensors.size()) == 1:
             prompt_tensors = prompt_tensors.unsqueeze(0)
 
-        # get decoder output 
-        assert isinstance(self.decoder.model, MBartForCausalLM)
 
+        # get decoder output
         decoder_output = self.decoder.model.generate(
             input_ids=prompt_tensors,
-            encoder_hidden_states=encoder_last_hidden_state,
-            pad_token_id=self.tokenizer.pad_token_id,
-            eos_token_id=self.tokenizer.eos_token_id,
+            encoder_hidden_states=encoder_outputs.last_hidden_state,
+            max_length=self.config.max_seq_len,
+            early_stopping=True,
+            pad_token_id=self.decoder.tokenizer.pad_token_id,
+            eos_token_id=self.decoder.tokenizer.eos_token_id,
             use_cache=True,
             num_beams=1,
-            bad_words_ids=[[self.tokenizer.unk_token_id]],
+            bad_words_ids=[[self.decoder.tokenizer.unk_token_id]],
+            return_dict_in_generate=True,
         )
         
         output = {"predictions": list()}
-        for seq in self.tokenizer.batch_decode(decoder_output):
-            seq = seq.replace(self.tokenizer.eos_token, "").replace(
-                self.tokenizer.pad_token, ""
+        for seq in self.decoder.tokenizer.batch_decode(decoder_output.sequences):
+            seq = seq.replace(self.decoder.tokenizer.eos_token, "").replace(
+                self.decoder.tokenizer.pad_token, ""
             )
             seq = re.sub(
                 r"<.*?>", "", seq, count=1
@@ -120,23 +126,6 @@ class MultipageTransformer(nn.Module):
 
         return output
 
-    def add_tokens(self, list_of_tokens: list[str]):
-        """
-        Add special tokens to tokenizer and resize the token embeddings of the decoder
-        """
-        newly_added_num = self.tokenizer.add_tokens(list(list_of_tokens))
-        if newly_added_num > 0:
-            self.decoder.model.resize_token_embeddings(len(self.tokenizer))
-
-    def add_special_tokens(self, tokens: dict[str, str]):
-        """
-        Add special tokens to tokenizer and resize the token embeddings
-        """
-        newly_added_num = self.tokenizer.add_special_tokens(
-            dict(tokens)
-        )
-        if newly_added_num > 0:
-            self.decoder.model.resize_token_embeddings(len(self.tokenizer))
 
     def json2token(
         self,
@@ -158,7 +147,7 @@ class MultipageTransformer(nn.Module):
                     keys = obj.keys()
                 for k in keys:
                     if update_special_tokens_for_json_key:
-                        self.add_tokens([rf"<s_{k}>", rf"</s_{k}>"])
+                        self.decoder.add_special_tokens([rf"<s_{k}>", rf"</s_{k}>"])
                     output += (
                         rf"<s_{k}>"
                         + self.json2token(
@@ -178,7 +167,7 @@ class MultipageTransformer(nn.Module):
             )
         else:
             obj = str(obj)
-            if f"<{obj}/>" in self.tokenizer.all_special_tokens:
+            if f"<{obj}/>" in self.decoder.tokenizer.all_special_tokens:
                 obj = f"<{obj}/>"  # for categorical special tokens
             return obj
 
@@ -219,7 +208,7 @@ class MultipageTransformer(nn.Module):
                         for leaf in content.split(r"<sep/>"):
                             leaf = leaf.strip()
                             if (
-                                leaf in self.tokenizer.get_added_vocab()
+                                leaf in self.decoder.tokenizer.get_added_vocab()
                                 and leaf[0] == "<"
                                 and leaf[-2:] == "/>"
                             ):

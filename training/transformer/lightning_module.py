@@ -66,7 +66,7 @@ class MultipageTransformerPLModule(BaseLightningModule):
         for pred, answer in zip(preds, answers):
             pred = re.sub(r"(?:(?<=>) | (?=</s_))", "", pred)
             answer = re.sub(r"<.*?>", "", answer, count=1)
-            answer = answer.replace(self.model.tokenizer.eos_token, "")
+            answer = answer.replace(self.model.decoder.tokenizer.eos_token, "")
             scores.append(edit_distance(pred, answer) / max(len(pred), len(answer)))
 
         self.validation_step_outputs.append(scores)
@@ -100,20 +100,21 @@ class MultipageTransformerPLModule(BaseLightningModule):
 
 class MultipagePLDataModule(pl.LightningDataModule):
     def __init__(
-        self, dataset_path: Path, model: MultipageTransformer, num_workers: int = 0
+        self, dataset_path: Path, model: MultipageTransformer, task_prompt: str, num_workers: int = 0
     ):
         super().__init__()
         self.dataset_path = Path(dataset_path)
         self.model = model
         self.num_workers = num_workers
-
+        self.task_prompt = task_prompt
+        
     def setup(self, stage=None):
         self.train_dataset = TransformerDataset(
             self.dataset_path,
             Bucket.Training,
             self.model,
             split="train",
-            task_start_token="<s_test>",
+            task_start_token=self.task_prompt,
             sort_json_key=False,
         )
 
@@ -122,7 +123,7 @@ class MultipagePLDataModule(pl.LightningDataModule):
             Bucket.Validation,
             self.model,
             split="train",
-            task_start_token="<s_test>",
+            task_start_token=self.task_prompt,
             sort_json_key=False,
         )
 
@@ -131,7 +132,7 @@ class MultipagePLDataModule(pl.LightningDataModule):
             Bucket.Testing,
             self.model,
             split="train",
-            task_start_token="<s_test>",
+            task_start_token=self.task_prompt,
             sort_json_key=False,
         )
 
