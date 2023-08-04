@@ -21,13 +21,13 @@ LIGHTNING_PATH = "/data/training/master_thesis/lightning_logs"
 
 N_EPOCHS = 30
 MAX_PAGES = 16
-NUM_WORKERS = 1
+NUM_WORKERS = 4
 
 TASK_PROMPT = "<s_classification>"
-IMAGE_SIZE  = (420, 360)
-PRETRAINED_ENCODER = "/data/training/master_thesis/models/swin-encoder-tiny/model.bin"
 
+PRETRAINED_ENCODER = "/data/training/master_thesis/models/swin-encoder-pretrained/model.bin"
 MAX_LENGTH = 768
+DETACHED = True
 
 
 special_tokens = [TASK_PROMPT]
@@ -37,19 +37,17 @@ for k in ["doc_id", "doc_class", "page_nr"]:
 # Define Model
 config = MultipageTransformerConfig(
     max_pages=MAX_PAGES,
-    input_size=IMAGE_SIZE,
     pretrained_encoder=PRETRAINED_ENCODER,
-
+    detached=DETACHED,
     special_tokens=special_tokens
 )
 
 model = MultipageTransformerPLModule(config)
-    
+
 data_module = MultipagePLDataModule(Path(DATASET_PATH), model.model,  task_prompt=TASK_PROMPT, num_workers=NUM_WORKERS) 
 
 data_module.prepare_data()
 data_module.setup() # ensure tokens are configured 
-# TODO maybe move tokens to model config 
 
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger

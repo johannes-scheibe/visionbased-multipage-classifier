@@ -17,9 +17,11 @@ class MultipageEncoder(nn.Module):
         self,
         encoder: SwinEncoder,  # TODO support general encoders
         max_pages: int,
+        detached: bool = False
     ):
         super().__init__()
-
+        self.detached = detached
+        
         self.page_encoder = encoder
 
         self.hidden_dim: int = self.page_encoder.hidden_dim
@@ -36,8 +38,12 @@ class MultipageEncoder(nn.Module):
 
         embeddings = []
         for px in pixel_values: # iterate over the batch and compute embs for each stack in batch
-            page_embeddings = self.page_encoder.forward(px)
-
+            if self.detached:
+                with torch.no_grad():
+                    page_embeddings = self.page_encoder.forward(px).detach()
+            else: 
+                page_embeddings = self.page_encoder.forward(px).detach()
+                
             pos_embeddings = self.pos_embedding_layer(
                 torch.arange(0, len(page_embeddings), device=page_embeddings.device)
             )

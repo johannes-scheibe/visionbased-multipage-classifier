@@ -14,9 +14,11 @@ class MultipageTransformerConfig(BaseModel):
     class Config:
         arbitrary_types_allowed = True
         
-    input_size: tuple[int, int] = (2560, 1920)
+    
     max_pages: int = 64
     max_seq_len: int = 768
+
+    detached: bool = False
 
     encoder_cfg: SwinEncoderConfig | None = None
     pretrained_encoder: str | None = None
@@ -49,7 +51,7 @@ class MultipageTransformer(nn.Module):
                 config.encoder_cfg # type: ignore
             )
 
-        self.encoder = MultipageEncoder(page_encoder, self.config.max_pages)
+        self.encoder = MultipageEncoder(page_encoder, self.config.max_pages, self.config.detached)
 
         self.decoder = BARTDecoder(
             max_position_embeddings=self.config.max_seq_len if self.config.max_position_embeddings is None else self.config.max_position_embeddings,
