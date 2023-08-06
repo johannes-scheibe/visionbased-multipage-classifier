@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytorch_lightning as pl
@@ -8,6 +9,8 @@ from multipage_classifier.encoder.swin_encoder import SwinEncoderConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from swin_encoder.lightning_module import SwinEncoderPLModule
+from transformers import DonutSwinModel, Swinv2Model, SwinModel
+
 
 torch.cuda.empty_cache()
 
@@ -19,25 +22,25 @@ LIGHTNING_PATH = "/data/training/master_thesis/lightning_logs"
 
 MAX_PAGES = 8
 BATCH_SIZE = 1
-NUM_WORKERS = 8
+NUM_WORKERS = 4
 
-N_EPOCHS = 50
+N_EPOCHS = 30
 
 PRETRAINED_MODEL = "microsoft/swin-tiny-patch4-window7-224"
 IMAGE_SIZE = (704, 512) # height, width TODO 1024, 1408
 
 if __name__ == "__main__":
 
+    classes = [c for c in json.load(open(CLASS_PATH))]
+
     # Define encoder
     swin_config = SwinEncoderConfig(
         image_size=IMAGE_SIZE, 
         pretrained_model_name_or_path=PRETRAINED_MODEL
     )
-
-    encoder_module = SwinEncoderPLModule(swin_config)
+    encoder_module = SwinEncoderPLModule(swin_config, num_classes=len(classes))
 
     # Define data module
-    classes = [c for c in json.load(open(CLASS_PATH))]
     data_module = MosaicDataModule(Path(DATASET_PATH), classes, encoder_module.encoder.prepare_input, batch_size=BATCH_SIZE, max_pages=MAX_PAGES, num_workers=NUM_WORKERS)
 
     import pytorch_lightning as pl
@@ -60,12 +63,12 @@ if __name__ == "__main__":
 
     trainer = pl.Trainer(
         accelerator="gpu",
-        devices=[2,3],
+        devices=[0],
         logger=logger,
         max_epochs=N_EPOCHS,
         callbacks=[checkpoint_callback],
         num_sanity_val_steps=0,
         precision=16
     )
-
+    
     trainer.fit(encoder_module, data_module)
