@@ -54,8 +54,9 @@ class MultipageTransformer(nn.Module):
         self.encoder = MultipageEncoder(page_encoder, self.config.max_pages, self.config.detached)
 
         self.decoder = BARTDecoder(
-            max_position_embeddings=self.config.max_seq_len if self.config.max_position_embeddings is None else self.config.max_position_embeddings,
             decoder_layer=self.config.decoder_layer,
+            hidden_dim=self.encoder.hidden_dim,
+            max_position_embeddings=self.config.max_seq_len if self.config.max_position_embeddings is None else self.config.max_position_embeddings,
             special_tokens=self.config.special_tokens,
             name_or_path=self.config.decoder_name_or_path,
         )

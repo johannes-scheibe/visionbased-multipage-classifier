@@ -41,11 +41,10 @@ class BARTDecoder(nn.Module):
     """
 
     def __init__(
-        self, decoder_layer: int, max_position_embeddings: int, special_tokens: list[str],  name_or_path: str | None = None # TODO name_or_path implementation
+        self, decoder_layer: int, hidden_dim: int, max_position_embeddings: int, special_tokens: list[str],  name_or_path: str | None = None # TODO name_or_path implementation
     ):
         super().__init__()
-        self.decoder_layer = decoder_layer
-        self.max_position_embeddings = max_position_embeddings
+
 
         
         self.tokenizer: MBartTokenizer = MBartTokenizer.from_pretrained("facebook/mbart-large-en-ro")
@@ -54,12 +53,12 @@ class BARTDecoder(nn.Module):
                 is_decoder=True,
                 is_encoder_decoder=False,
                 add_cross_attention=True,
-                decoder_layers=self.decoder_layer,
-                max_position_embeddings=self.max_position_embeddings,
+                decoder_layers=decoder_layer,
+                max_position_embeddings=max_position_embeddings,
                 vocab_size=len(self.tokenizer),
                 scale_embedding=True,
                 add_final_layer_norm=True,
-                d_model=768
+                d_model=hidden_dim
             )
         )
         self.model.forward = self.forward  #  to get cross attentions and utilize `generate` function
