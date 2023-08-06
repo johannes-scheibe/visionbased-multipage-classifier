@@ -1,8 +1,9 @@
+from collections import defaultdict
 from functools import partial
 import math
 import re
 from pathlib import Path
-from typing import List
+from typing import Any, List
 
 import numpy as np
 import pytorch_lightning as pl
@@ -47,7 +48,8 @@ class MultipageTransformerPLModule(BaseLightningModule):
         decoder_input_ids = batch["decoder_input_ids"]
         prompt_end_idxs = batch["prompt_end_index"]
         answers = batch["target_sequence"]
-
+        ground_truths = batch["ground_truth"]
+        
         decoder_prompts = pad_sequence(
             [
                 input_id[: end_idx + 1]
@@ -62,22 +64,45 @@ class MultipageTransformerPLModule(BaseLightningModule):
             return_json=False,
         )["predictions"]
 
-        scores = list()
-        for pred, answer in zip(preds, answers):
+        def check_pred(pred: Any, dst_len) -> list[dict[str, str]]:
+            if type(pred) == list:
+                res = [element if isinstance(element, dict) else {} for element in pred]
+                res.extend([{}]*(dst_len-len(pred)))
+                return res
+            return [{}]*dst_len
+
+        out = defaultdict(list)
+        for pred, answer, gt in zip(preds, answers, ground_truths):
             pred = re.sub(r"(?:(?<=>) | (?=</s_))", "", pred)
             answer = re.sub(r"<.*?>", "", answer, count=1)
             answer = answer.replace(self.model.decoder.tokenizer.eos_token, "")
-            scores.append(edit_distance(pred, answer) / max(len(pred), len(answer)))
+            
+            out["scores"].append(edit_distance(pred, answer) / max(len(pred), len(answer)))
 
-        self.validation_step_outputs.append(scores)
+            page_preds = check_pred(self.model.token2json(pred), len(gt)) 
+            for truth, p in zip(gt, page_preds):
+                out["acc_doc_id"].append(truth.get("doc_id", None) == p.get("doc_id", None))
+                out["acc_doc_class"].append(truth.get("doc_class", None) == p.get("doc_class", None))
+                out["acc_page_nr"].append(truth.get("pag_nr", None) == p.get("page_nr", None))
+            
+        self.validation_step_outputs.append(out)
 
-        return preds, answers, scores
+        return preds, answers, out["scores"]
 
     def on_validation_epoch_end(self):
-        cnt = sum(len(scores) for scores in self.validation_step_outputs)
-        val_metric = sum(np.sum(scores) for scores in self.validation_step_outputs)
+        metric = {}
+        flattend = defaultdict(list)
+        for dct in self.validation_step_outputs:
+            for key, value in dct.items():
+                flattend[key].extend(value)
 
-        self.log_dict({"val_metric": val_metric / cnt}, sync_dist=True)
+        metric["val/edit_distance"] = sum(flattend["scores"]) / len(flattend["scores"])
+        metric["val/acc_doc_id"] = sum(flattend["acc_doc_id"]) / len(flattend["acc_doc_id"])
+        metric["val/acc_doc_class"] = sum(flattend["acc_doc_class"]) / len(flattend["acc_doc_class"])
+        metric["val/acc_page_nr"] = sum(flattend["acc_page_nr"]) / len(flattend["acc_page_nr"])
+
+
+        self.log_dict(metric, sync_dist=True)
 
         self.validation_step_outputs.clear()  # free memory
 
@@ -169,9 +194,14 @@ class MultipagePLDataModule(pl.LightningDataModule):
 
 def collate(samples: List[TransformerSample]):
     # offset = random.randint(0, max(0, (len(batch) - max_pages_per_batch))) NOTE: cant apply offset because this would require changes of the doc_ids for example
-
-    batch = [s.dict() for s in samples]
+    batch = []
+    gt = []
+    for s in samples:
+        data = s.dict()
+        gt.append(data.pop("ground_truth")) # dont collate ground_tuth
+        batch.append(data)
 
     ret = default_collate(batch)
-
+    assert "ground_truth" not in ret
+    ret["ground_truth"] = gt
     return ret
