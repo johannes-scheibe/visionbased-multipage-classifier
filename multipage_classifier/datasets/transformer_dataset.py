@@ -59,10 +59,6 @@ class TransformerDataset(Dataset):
         )
         self.sort_json_key = sort_json_key
 
-        # self.model.decoder.add_special_tokens([self.task_start_token, self.prompt_end_token])
-        # # TODO dont hard code the tokens here
-        # self.model.decoder.add_special_tokens([rf"<s_{k}>" for k in ["doc_id", "doc_class", "page_nr"]])
-        # self.model.decoder.add_special_tokens([rf"</s_{k}>" for k in ["doc_id", "doc_class", "page_nr"]])
         self.prompt_end_token_id = model.decoder.tokenizer.convert_tokens_to_ids(
             self.prompt_end_token
         )
@@ -88,9 +84,24 @@ class TransformerDataset(Dataset):
         page_tensors: list[torch.Tensor] = []
         ground_truth = []
 
-        for doc_id, predicted_doc in enumerate(best_candidate["documents"]):
-            
+        # calculate offset in relation to max pages
+        total_len = sum(max(1, len(doc["pages"])) for doc in best_candidate["documents"])
+        offset = random.randint(0, max(0, (total_len - self.model.config.max_pages)))
 
+        
+        doc_offset = 0
+        page_offset = 0
+        for doc in best_candidate["documents"]:
+            n_pages = max(1, len(doc["pages"]))
+            page_offset = offset
+            offset -= n_pages
+            if offset > 0:
+                doc_offset += 1
+                continue
+            break
+        
+        for doc_id, predicted_doc in enumerate(best_candidate["documents"][doc_offset:]):
+            
             class_identifier = str(
                 Path(predicted_doc["documentClass"]).relative_to(
                     document["documentClass"]
@@ -100,6 +111,9 @@ class TransformerDataset(Dataset):
             pages = predicted_doc["pages"]
             if len(pages) == 0:
                 pages = [{"sourcePage": i} for i in range(len(document["pages"]))]
+
+            if doc_id == 0:
+                pages = pages[page_offset:]
 
             for dst_page, page in enumerate(pages):
                 src_page = page.get("sourcePage", 0)  # NOTE the default value is 0
@@ -112,13 +126,12 @@ class TransformerDataset(Dataset):
                 ).unsqueeze(0))
 
                 ground_truth.append({
-                        "doc_id": doc_id,
-                        "doc_class": class_identifier,
-                        "page_nr": dst_page,
+                        "doc_id": str(doc_id),
+                        "doc_class": str(class_identifier),
+                        "page_nr": str(dst_page),
                     }
                 )
-        
-        # TODO offset and stuff
+
         page_tensors = page_tensors[:self.model.config.max_pages]
         ground_truth = ground_truth[:self.model.config.max_pages]
 
