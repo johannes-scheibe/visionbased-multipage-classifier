@@ -27,12 +27,10 @@ class SwinEncoder(nn.Module):
         cfg: SwinEncoderConfig
     ):
         super().__init__()
-
-        self.cfg = cfg
         
-        config = AutoConfig.from_pretrained(self.cfg.pretrained_model_name_or_path)
+        config = AutoConfig.from_pretrained(cfg.pretrained_model_name_or_path)
         config.image_size = cfg.image_size
-        self.model = cast(self.cfg.pretrained_model_type, self.cfg.pretrained_model_type.from_pretrained(cfg.pretrained_model_name_or_path, config=config))
+        self.model = cast(cfg.pretrained_model_type, cfg.pretrained_model_type.from_pretrained(cfg.pretrained_model_name_or_path, config=config))
         
         self.hidden_dim = self.model.num_features
         

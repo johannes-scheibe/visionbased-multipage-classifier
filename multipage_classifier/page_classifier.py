@@ -1,6 +1,6 @@
 import os
 import re
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union, cast
 
 import numpy as np
 import torch
@@ -9,7 +9,9 @@ from PIL import Image, ImageOps
 from pydantic import BaseModel
 from torchvision import transforms
 from torchvision.transforms.functional import resize, rotate
-from transformers import MBartConfig, MBartForCausalLM, MBartTokenizer
+from transformers.models.mbart import MBartTokenizer
+from transformers.models.swin import SwinModel
+from transformers.models.swinv2 import Swinv2Model
 
 from multipage_classifier.decoder.separator import DocumentSeparator, DocumentSeparatorConfig
 from multipage_classifier.encoder.multipage_encoder import MultipageEncoder
@@ -17,13 +19,15 @@ from multipage_classifier.encoder.swin_encoder import SwinEncoder, SwinEncoderCo
 
 
 class MultipageClassifierConfig(BaseModel):
-    input_size: List[int] = [2560, 1920]
+    image_size: tuple[int, int]
+
     num_classes: int 
     max_pages: int = 64
     max_seq_len: int = 768
 
     # Encoder params    
-    encoder_cfg: BaseModel
+    encoder_cfg: SwinEncoderConfig | None = None
+    pretrained_encoder: str | None = None
 
     # Decoder params
     
@@ -42,10 +46,16 @@ class MultipageClassifier(nn.Module):
             ]
         )
         self.tokenizer = MBartTokenizer.from_pretrained("facebook/mbart-large-en-ro")
+        
+        assert self.config.pretrained_encoder or self.config.encoder_cfg
 
-        page_encoder = SwinEncoder(
-            **self.config.encoder_cfg.dict()
-        )
+        if self.config.pretrained_encoder:
+            page_encoder = torch.load(self.config.pretrained_encoder)
+        else:
+            page_encoder = SwinEncoder(
+                config.encoder_cfg # type: ignore
+            )
+
         self.encoder = MultipageEncoder(page_encoder, self.config.max_pages)
 
         sep_config = DocumentSeparatorConfig(
@@ -69,32 +79,3 @@ class MultipageClassifier(nn.Module):
         preds = self.forward(pixel_values)
         preds = self.separator.postprocess(preds)
         return preds
-
-    def prepare_input(self, img: Image.Image, random_padding: bool = False, align_long_axis = False) -> torch.Tensor:
-        img = img.convert("RGB")
-        if align_long_axis and (
-            (self.config.input_size[0] > self.config.input_size[1] and img.height > img.width)
-            or (self.config.input_size[0] < self.config.input_size[1] and img.height < img.width)
-        ):
-            img = rotate(img, angle=-90, expand=True)
-        img = resize(img, min(self.config.input_size))
-        img.thumbnail((self.config.input_size[0], self.config.input_size[1]))
-        delta_width = self.config.input_size[0] - img.width
-        delta_height = self.config.input_size[1] - img.height
-        if random_padding:
-            pad_width = np.random.randint(low=0, high=delta_width + 1)
-            pad_height = np.random.randint(low=0, high=delta_height + 1)
-        else:
-            pad_width = delta_width // 2
-            pad_height = delta_height // 2
-        padding = (
-            pad_width,
-            pad_height,
-            delta_width - pad_width,
-            delta_height - pad_height,
-        )
-
-        pixel_values = torch.Tensor(self.to_tensor(ImageOps.expand(img, padding)))
-
-        return pixel_values
-    
