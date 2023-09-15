@@ -34,25 +34,19 @@ class MultipageEncoder(nn.Module):
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=3)
 
-    def forward(self, pixel_values: torch.Tensor) -> EncoderOutput:
+    def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
 
-        embeddings = []
-        for px in pixel_values: # iterate over the batch and compute embs for each stack in batch
-            if self.detached:
-                with torch.no_grad():
-                    page_embeddings = self.page_encoder.forward(px).detach()
-            else: 
-                page_embeddings = self.page_encoder.forward(px).detach()
-                
-            pos_embeddings = self.pos_embedding_layer(
-                torch.arange(0, len(page_embeddings), device=page_embeddings.device)
-            )
-            document_embeddings = self.transformer_encoder(
-                page_embeddings.unsqueeze(0) + pos_embeddings.unsqueeze(0)
-            ).view(-1, self.hidden_dim).unsqueeze(0)
-
-            embeddings.append(document_embeddings)
-
-        return EncoderOutput(
-            last_hidden_state=torch.cat(embeddings),
+        if self.detached:
+            with torch.no_grad():
+                page_embeddings = self.page_encoder.forward(pixel_values).detach()
+        else: 
+            page_embeddings = self.page_encoder.forward(pixel_values)
+            
+        pos_embeddings = self.pos_embedding_layer(
+            torch.arange(0, len(page_embeddings), device=page_embeddings.device)
         )
+        document_embeddings = self.transformer_encoder(
+            page_embeddings.unsqueeze(0) + pos_embeddings.unsqueeze(0)
+        ).view(-1, self.hidden_dim)
+
+        return document_embeddings

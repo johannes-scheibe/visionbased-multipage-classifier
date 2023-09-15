@@ -34,7 +34,6 @@ class SwinEncoder(nn.Module):
         
         self.hidden_dim = self.model.num_features
         
-
     def forward(self, pixel_values: torch.Tensor, return_pooled_output: bool = True) -> torch.Tensor:
         """
         Args:
@@ -45,23 +44,19 @@ class SwinEncoder(nn.Module):
             return out.pooler_output
         return out.last_hidden_state
 
-    def prepare_input(self, img: Image.Image, random_padding: bool = False, align_long_axis = False) -> torch.Tensor:
+    def prepare_input(self, img: Image.Image, align_long_axis = True) -> torch.Tensor:
         img = img.convert("RGB")
-        if align_long_axis and (
-            (self.model.config.image_size[1] > self.model.config.image_size[0] and img.width < img.height)
-            or (self.model.config.image_size[1] < self.model.config.image_size[0] and img.width > img.height)
-        ):
-            img = rotate(img, angle=-90, expand=True) # type: ignore
-        img = resize(img, min(self.model.config.image_size)) # type: ignore
+
+        w, h = img.size
+        if align_long_axis and (w > h) != (self.model.config.image_size[1] > self.model.config.image_size[0]):
+            img = img.rotate(90, expand=True)
+
         img.thumbnail((self.model.config.image_size[1], self.model.config.image_size[0]))
         delta_width = self.model.config.image_size[1] - img.width
         delta_height = self.model.config.image_size[0] - img.height
-        if random_padding:
-            pad_width = np.random.randint(low=0, high=delta_width + 1)
-            pad_height = np.random.randint(low=0, high=delta_height + 1)
-        else:
-            pad_width = delta_width // 2
-            pad_height = delta_height // 2
+
+        pad_width = delta_width // 2
+        pad_height = delta_height // 2
         padding = (
             pad_width,
             pad_height,
@@ -69,6 +64,8 @@ class SwinEncoder(nn.Module):
             delta_height - pad_height,
         )
 
-        pixel_values = transforms.ToTensor()(ImageOps.expand(img, padding))
+        img = ImageOps.expand(img, padding, fill="white")
+
+        pixel_values = transforms.ToTensor()(img)
 
         return pixel_values

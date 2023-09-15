@@ -23,12 +23,13 @@ class MultipageClassifierConfig(BaseModel):
 
     num_classes: int 
     max_pages: int = 64
+    max_page_nr: int = 96 # TODO adjust in dataset
     max_seq_len: int = 768
 
     # Encoder params    
     encoder_cfg: SwinEncoderConfig | None = None
     pretrained_encoder: str | None = None
-
+    detached: bool = True
     # Decoder params
     
 
@@ -56,12 +57,14 @@ class MultipageClassifier(nn.Module):
                 config.encoder_cfg # type: ignore
             )
 
-        self.encoder = MultipageEncoder(page_encoder, self.config.max_pages)
+        self.encoder = MultipageEncoder(page_encoder, self.config.max_pages, self.config.detached)
 
         sep_config = DocumentSeparatorConfig(
             embedding_size=self.encoder.hidden_dim,
             num_classes=self.config.num_classes,
-            max_pages=self.config.max_pages
+            max_pages=self.config.max_pages,
+            max_page_nr=self.config.max_page_nr
+
         )
         self.separator = DocumentSeparator(
             sep_config
@@ -70,9 +73,11 @@ class MultipageClassifier(nn.Module):
 
     def forward(self, pixel_values: torch.Tensor) -> dict[str, torch.Tensor]:
         encoder_outputs = self.encoder(pixel_values) # TODO do this for every item in Batch
+
         preds = self.separator(
             encoder_outputs
         )
+
         return preds
 
     def predict(self, pixel_values: torch.Tensor):
