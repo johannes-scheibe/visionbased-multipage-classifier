@@ -10,7 +10,8 @@ import torch.nn as nn
 class DocumentSeparatorConfig(BaseModel):
     num_classes: int
     max_pages: int = 64
-    
+    max_page_nr: int = 96 
+
     doc_nr_group_threshold: float = 0.5
 
     embedding_size: int 
@@ -27,7 +28,7 @@ class DocumentSeparator(nn.Module):
 
         self.heads = nn.ModuleDict({})
         self.heads["doc_class"] = self.get_head([self.config.embedding_size, self.config.num_classes])
-        self.heads["page_nr"] = self.get_head([self.config.embedding_size, self.config.max_pages])
+        self.heads["page_nr"] = self.get_head([self.config.embedding_size, self.config.max_page_nr])
         self.heads["doc_id"] = self.get_head([self.config.embedding_size, self.config.max_pages])
 
         self.cluster_prediction = DBSCAN(
