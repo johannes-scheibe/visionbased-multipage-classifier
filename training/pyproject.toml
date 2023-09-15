@@ -8,9 +8,9 @@ packages = [{include = "utils"}]
 [tool.poetry.dependencies]
 multipage-classifier = { path = "../", develop=true}
 python = "^3.10.0"
-torch = "==2.0.0"
+torch = ">=2.0.0, !=2.0.1"
 torchvision = "^0.15.0"
-pytorch-lightning = "^1.9.1"
+pytorch-lightning = "^2.0.0"
 transformers = "^4.26.0"
 tensorboard = "^2.12.0"
 pydantic = "^1.10.5"

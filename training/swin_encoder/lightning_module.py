@@ -1,4 +1,3 @@
-
 from inspect import signature
 from typing import Any, cast
 
@@ -10,9 +9,8 @@ from utils.lightning import BaseLightningModule
 ORDER_NAMES = ["None", "Pred", "Succ", "Same"]
 
 class SwinEncoderPLModule(BaseLightningModule):
-    encoder: SwinEncoder
 
-    def __init__(self, cfg: SwinEncoderConfig, num_classes: int):
+    def __init__(self, cfg: SwinEncoderConfig):
         super().__init__()
         
         self.save_hyperparameters()
@@ -27,15 +25,7 @@ class SwinEncoderPLModule(BaseLightningModule):
             torch.nn.Linear(768, len(ORDER_NAMES))
         )
 
-        self.classification_head = torch.nn.Sequential(
-            torch.nn.Linear(self.encoder.hidden_dim, 768),
-            torch.nn.ReLU(),
-            torch.nn.Linear(768, num_classes)
-        )
-        self.metrics = torch.nn.ModuleDict({})
-        self.confmat = torch.nn.ModuleDict({})
-        self.metrics["order"], self.confmat["order"] = self.get_metrics("order", task="multiclass", num_classes=len(ORDER_NAMES))      
-        self.metrics["class"], self.confmat["class"] = self.get_metrics("class", task="multiclass", num_classes=num_classes)      
+        self.set_default_metrics("order", task="multiclass", num_classes=len(ORDER_NAMES))
 
 
 
@@ -55,12 +45,6 @@ class SwinEncoderPLModule(BaseLightningModule):
         gt = {}
         losses = {}
 
-        ### Classification Head ###
-        pred["class"] = torch.log_softmax(self.classification_head(embs), dim=-1)
-        gt["class"] = batch["doc_class"]
-        losses["class_loss"] = torch.nn.NLLLoss()(pred["class"], gt["class"])
-
-        ### Order Head ###
         # Compute order head input
         diff = embs.unsqueeze(0).repeat(bs, 1, 1)
         diff = torch.cat([diff, diff.permute(1, 0, 2)], -1).view(-1, self.encoder.hidden_dim * 2)

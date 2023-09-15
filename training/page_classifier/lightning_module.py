@@ -18,12 +18,9 @@ class MultipageClassifierPLModule(BaseLightningModule):
 
         self.classifier = MultipageClassifier(config)
 
-        self.metrics = torch.nn.ModuleDict({})
-        self.confmat = torch.nn.ModuleDict({})
-        self.metrics["doc_class"], self.confmat["doc_class"] = self.get_metrics("doc_class", task="multiclass", num_classes=self.config.num_classes)        
-        self.metrics["page_nr"], self.confmat["page_nr"] = self.get_metrics("page_nr", task="multiclass", num_classes=self.config.max_pages)        
-        self.metrics["doc_id"], _ = self.get_metrics("doc_id", task="multilabel", num_labels=self.config.max_pages)        
-
+        self.set_default_metrics("doc_class", task="multiclass", num_classes=self.config.num_classes)        
+        self.set_default_metrics("page_nr", task="multiclass", num_classes=self.config.max_page_nr)        
+        self.set_default_metrics("doc_id", task="multilabel", num_labels=self.config.max_pages, confmat=False)        
 
         self.save_hyperparameters()
 
@@ -38,6 +35,7 @@ class MultipageClassifierPLModule(BaseLightningModule):
         # Ground truth
         gt = {}
         gt.update({k: batch[k] for k in self.classifier.separator.heads.keys()})
+        
         doc_ids = batch["doc_id"]
         doc_ids = torch.cat(
             [
@@ -46,13 +44,12 @@ class MultipageClassifierPLModule(BaseLightningModule):
                              len(doc_ids)), device=self.device),
             ]
         )
-        gt["doc_id"] = (doc_ids[:batch_size].view(-1, 1)
-                        == doc_ids.view(1, -1)).float()
+        gt["doc_id"] = (doc_ids[:batch_size].view(-1, 1) == doc_ids.view(1, -1)).int()
 
         losses = {}
         for k, v in preds.items():
             if k == "doc_id":
-                losses["doc_id_loss"] = sigmoid_focal_loss(v, gt[k])
+                losses["doc_id_loss"] = sigmoid_focal_loss(v, gt[k].float())
                 continue
             losses[f"{k}_loss"] = torch.nn.NLLLoss()(v, batch[k])
         return preds, gt, losses

@@ -9,6 +9,7 @@ from sklearn.metrics import ConfusionMatrixDisplay
 from torch.nn import ModuleDict
 from torchmetrics import Accuracy, ConfusionMatrix, Metric, MetricCollection
 
+from pytorch_lightning.loggers import TensorBoardLogger
 
 class Mode(Enum):
     TRAIN = "train"
@@ -22,38 +23,55 @@ class BaseLightningModule(pl.LightningModule):
 
     mode: Mode = Mode.TRAIN
 
-    def get_metrics(
+    logger: TensorBoardLogger
+    def __init__(self) -> None:
+        super().__init__()
+
+        self.init_metrics()
+        
+
+    def init_metrics(self):
+        metrics = torch.nn.ModuleDict({})
+        confmat = torch.nn.ModuleDict({})
+        for mode in [m.value for m in Mode]:
+            metrics[f"_{mode}"] = torch.nn.ModuleDict({})
+            confmat[f"_{mode}"] = torch.nn.ModuleDict({})
+
+        self.metrics = metrics
+        self.confmat = confmat
+
+    def add_metrics(self, key: str, metric: MetricCollection, mode: Mode):
+        self.metrics[f"_{mode.value}"][key] = metric # type: ignore
+
+    def add_confmat(self, key: str, matrix: Metric, mode: Mode):
+        self.confmat[f"_{mode.value}"][key] = matrix # type: ignore
+
+    def set_default_metrics(
         self,
-        name: str,
+        key: str,
         task: Literal["binary", "multiclass", "multilabel"],
         num_classes: int | None = None,
         num_labels: int | None= None,
-    ) -> Tuple[ModuleDict, ModuleDict]:
-        metrics = ModuleDict({})
-        confusion_matrices = ModuleDict({})
-
-        for mode in [m.value for m in Mode]:
+        confmat: bool = True
+    ) -> None:
+        for mode in Mode:
             n = num_classes or num_labels 
             assert n
             top_k = min(n - 1, 3)
 
-            curr_metrics = MetricCollection(
+            self.add_metrics(key, MetricCollection(
                 {
                     "acc": Accuracy(task=task, num_classes=num_classes, num_labels=num_labels),
                     f"top{top_k}_acc": Accuracy(
-                        task=task, num_classes=num_classes, num_labels=num_labels,  top_k=top_k
+                        task=task, num_classes=num_classes, num_labels=num_labels, top_k=top_k
                     ),
                 },
-                postfix=f"_{name}",
-            )
-
-            curr_confusion_matrix = ConfusionMatrix(
-                task=task, num_labels=num_labels, num_classes=num_classes, normalize="true"
-            )
-            metrics[f"_{mode}"] = curr_metrics
-            confusion_matrices[f"_{mode}"] = curr_confusion_matrix
-
-        return metrics, confusion_matrices
+                postfix=f"_{key}",
+            ), mode)
+            if confmat:
+                self.add_confmat(key, ConfusionMatrix(
+                    task=task, num_labels=num_labels, num_classes=num_classes, normalize="true"
+                ), mode)
 
     @abstractmethod
     def step(
@@ -69,9 +87,9 @@ class BaseLightningModule(pl.LightningModule):
         self.update_metrics(preds, gt)
         return self.log_losses(losses)
 
-    def training_epoch_end(self, outputs) -> None:
+    def on_training_epoch_end(self) -> None:
         self.mode = Mode.TRAIN
-        self.shared_epoch_end(outputs)
+        self.shared_epoch_end()
 
     def validation_step(self, batch: Any, batch_idx: int) -> Dict[str, Any]:
         self.mode = Mode.VALID
@@ -79,9 +97,9 @@ class BaseLightningModule(pl.LightningModule):
         self.update_metrics(preds, gt)
         return self.log_losses(losses)
 
-    def validation_epoch_end(self, outputs) -> None:
+    def on_validation_epoch_end(self) -> None:
         self.mode = Mode.VALID
-        self.shared_epoch_end(outputs)
+        self.shared_epoch_end()
 
     def test_step(self, batch: Any, batch_idx: int) -> Dict[str, Any]:
         self.mode = Mode.TEST
@@ -89,32 +107,24 @@ class BaseLightningModule(pl.LightningModule):
         self.update_metrics(preds, gt)
         return self.log_losses(losses)
 
-    def test_epoch_end(self, outputs) -> None:
+    def on_test_epoch_end(self) -> None:
         self.mode = Mode.TEST
-        self.shared_epoch_end(outputs)
+        self.shared_epoch_end()
 
-    def shared_epoch_end(self, _) -> None:
-        # Compute metrics:
-        if hasattr(self, "metrics"):
-            for k, v in self.metrics.items():
-                metric: Metric = v[f"_{self.mode.value}"]
-                self.log_metrics(metric.compute())
-                metric.reset()
-
-        # Compute confusion matrax
-        if hasattr(self, "confmat"):
-            for k, v in self.confmat.items():
-                confmat: Metric = v[f"_{self.mode.value}"]
-                # Log the confusion matrix as a figure
-                self.logger.experiment.add_figure(
-                    f"{self.mode.value}_confmat_{k}",
-                    self.get_confusion_matrix(
-                        confmat.compute().cpu().data.numpy(), confmat.num_classes
-                    ),
-                    self.global_step,
-                )
-                # Reset the confusion matrix for the next epoch
-                confmat.reset()
+    def shared_epoch_end(self) -> None:
+        for k, m in self.metrics[f"_{self.mode.value}"].items(): # type: ignore
+            self.log_metrics(m.compute())
+            m.reset()
+        for k, c in self.confmat[f"_{self.mode.value}"].items(): # type: ignore
+            fig_ = self.get_confusion_matrix(
+                c.compute().cpu().data.numpy(), c.num_classes
+            )
+            self.logger.experiment.add_figure(
+                f"{self.mode.value}_confmat_{k}",
+                fig_,
+                self.current_epoch,
+            )
+            c.reset()
 
     def get_confusion_matrix(self, cf_matrix, num_classes):
         fig, ax = plt.subplots(
@@ -129,11 +139,10 @@ class BaseLightningModule(pl.LightningModule):
         return fig
 
     def update_metrics(self, pred: Dict, gt):
-        for k, v in pred.items():
-            if k in self.metrics:
-                self.metrics[k][f"_{self.mode.value}"].update(v, gt[k])
-            if k in self.confmat:
-                self.confmat[k][f"_{self.mode.value}"].update(v, gt[k])
+        for k, m in self.metrics[f"_{self.mode.value}"].items(): # type: ignore
+            m.update(pred[k], gt[k])
+        for k, c in self.confmat[f"_{self.mode.value}"].items(): # type: ignore
+            c.update(pred[k], gt[k])
 
     def log_metrics(self, metrics: Dict):
         self.log_dict(
