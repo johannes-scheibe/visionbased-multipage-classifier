@@ -44,56 +44,24 @@ class MosaicDataset(Dataset):
         return len(self.inventory)
 
     def __getitem__(self, idx: int):
-        letter_id = idx
 
         sample_path = self.path / self.inventory[idx]
-        sample_data = {
-            path.name: path.read_bytes()
-            for path in sample_path.iterdir()
-            if path.is_file() and path.name != self.sample_info_file_name
-        }
 
-        document = json.loads(sample_data["document.json"].decode())
+        ground_truth = json.load(open(sample_path / "ground_truth.json"))
 
-        best_candidate = max(
-            document["prediction"]["candidates"], key=lambda c: c["score"]
-        )
-        assert len(best_candidate["documents"]) > 0 and len(document["pages"]) > 0
+        offset = random.randint(0, max(0, (len(ground_truth) - self.max_pages)))
+        batch = ground_truth[offset : offset + self.max_pages]
 
-        batch = []
+        doc_id_offset = ground_truth[0]["doc_id"]
+        for sample in batch:
+            sample["letter_id"] = idx # TODO maybe use str2int mapping
+            sample["doc_id"] -= doc_id_offset  # doc_ids should start at 0
+            sample["doc_class"] = self.class2id[sample["doc_class"]]        
+            src_page = sample["src_page"]
+            img = Image.open(sample_path / f"page_{src_page}.png")
+            sample["pixel_values"] = self.prepare_function(img)
 
-        for doc_id, predicted_doc in enumerate(best_candidate["documents"]):
-            class_identifier = str(
-                Path(predicted_doc["documentClass"]).relative_to(
-                    document["documentClass"]
-                )
-            )
-            if class_identifier not in self.classes:
-                raise ValueError(
-                    f"Prediction contains invalid class identifier: {class_identifier}"
-                )
-
-            pages = predicted_doc["pages"]
-            if len(pages) == 0:
-                pages = [{"sourcePage": i} for i in range(len(document["pages"]))]
-
-            doc = []
-            for dst_page, page in enumerate(pages[: self.max_pages]):
-                src_page = page.get("sourcePage", 0)  # NOTE the default value is 0
-                page_bytes = sample_data[f"page_{src_page}.png"]
-                img = Image.open(io.BytesIO(page_bytes))
-
-                page = {
-                    "pixel_values": self.prepare_function(img),
-                    "letter_id": letter_id,
-                    "doc_class": self.class2id[class_identifier],
-                    "doc_id": doc_id,
-                    "page_nr": dst_page,
-                }
-                doc.append(page)
-            batch.append(doc)
-
-        return batch[: self.max_pages]
+        return batch
 
 
 class MosaicDataModule(pl.LightningDataModule):
@@ -145,7 +113,7 @@ class MosaicDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=partial(collate, batch_size=self.max_pages),
+            collate_fn=collate,
         )
 
     def val_dataloader(self):
@@ -155,7 +123,7 @@ class MosaicDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=partial(val_collate, batch_size=self.max_pages),
+            collate_fn=val_collate,
         )
 
     def test_dataloader(self):
@@ -165,7 +133,7 @@ class MosaicDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=partial(val_collate, batch_size=self.max_pages),
+            collate_fn=val_collate,
         )
 
 
@@ -182,37 +150,28 @@ def window_shuffle(input_list, window_size=3, shuffle_percent=0.25):
 
 
 def collate(
-    samples: List[List[List[dict]]], batch_size: int, shuffle_mode="window"
+    samples: list[list[dict[str, Any]]], shuffle_mode="window"
 ):  # "all", "none"
-    batch: List[dict] = []
-    i = 0
-    for sample in samples:
-        for doc in sample:
-            for p in doc:
-                p["doc_id"] = i
-            if shuffle_mode == "all":
-                random.shuffle(doc)
-            elif shuffle_mode == "window":
-                sample = window_shuffle(doc)
-            batch.extend(doc)
-            i += 1
+    assert len(samples) == 1
 
-    ret = default_collate(batch[:batch_size])
+    sample = samples[0]
 
-    return ret
+    # TODO schuffle
+    # if shuffle_mode == "all":
+    #     random.shuffle(doc)
+    # elif shuffle_mode == "window":
+    #     sample = window_shuffle(doc)
+
+    batch = default_collate(sample)
+
+    return batch
 
 
-def val_collate(samples: List[List[List[dict]]], batch_size: int) -> Dict:
-    batch: List[dict] = []
-    i = 0
-    for sample in samples:
-        for doc in sample:
-            for p in doc:
-                p["doc_id"] = i
+def val_collate(samples: list[list[dict[str, Any]]]):
+    assert len(samples) == 1
 
-            batch.extend(doc)
-            i += 1
+    sample = samples[0]
 
-    ret = default_collate(batch[:batch_size])
+    batch = default_collate(sample)
 
-    return ret
+    return batch

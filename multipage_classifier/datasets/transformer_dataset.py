@@ -68,72 +68,31 @@ class TransformerDataset(Dataset):
 
     def __getitem__(self, idx: int) -> TransformerSample:
         sample_path = self.path / self.inventory[idx]
-        sample_data = {
-            path.name: path.read_bytes()
-            for path in sample_path.iterdir()
-            if path.is_file() and path.name != self.sample_info_file_name
-        }
+        
+        sample = json.load(open(sample_path / "ground_truth.json"))
 
-        document = json.loads(sample_data["document.json"].decode())
-
-        best_candidate = max(
-            document["prediction"]["candidates"], key=lambda c: c["score"]
-        )
-        assert len(best_candidate["documents"]) > 0 and len(document["pages"]) > 0
-
+        offset = random.randint(0, max(0, (len(sample) - self.model.config.max_pages)))
+        batch = sample[offset : offset + self.model.config.max_pages]
+        
         page_tensors: list[torch.Tensor] = []
-        ground_truth = []
+        ground_truth: list[dict[str, str]] = []
 
-        # calculate offset in relation to max pages
-        total_len = sum(max(1, len(doc["pages"])) for doc in best_candidate["documents"])
-        offset = random.randint(0, max(0, (total_len - self.model.config.max_pages)))
-
-        
-        doc_offset = 0
-        page_offset = 0
-        for doc in best_candidate["documents"]:
-            n_pages = max(1, len(doc["pages"]))
-            page_offset = offset
-            offset -= n_pages
-            if offset > 0:
-                doc_offset += 1
-                continue
-            break
-        
-        for doc_id, predicted_doc in enumerate(best_candidate["documents"][doc_offset:]):
+        doc_id_offset = ground_truth[0]["doc_id"]
+        for sample in batch:
             
-            class_identifier = str(
-                Path(predicted_doc["documentClass"]).relative_to(
-                    document["documentClass"]
-                )
+            src_page = sample["src_page"]
+            img = Image.open(sample_path / f"page_{src_page}.png")
+                
+            page_tensors.append(self.model.encoder.page_encoder.prepare_input(
+                img, self.bucket == Bucket.Training
+            ).unsqueeze(0))
+
+            ground_truth.append({
+                    "doc_id": str(sample["doc_id"] - doc_id_offset),
+                    "doc_class": str(sample["doc_class"]),
+                    "page_nr": str(sample["page_nr"]),
+                }
             )
-            
-            pages = predicted_doc["pages"]
-            if len(pages) == 0:
-                pages = [{"sourcePage": i} for i in range(len(document["pages"]))]
-
-            if doc_id == 0:
-                pages = pages[page_offset:]
-
-            for dst_page, page in enumerate(pages):
-                src_page = page.get("sourcePage", 0)  # NOTE the default value is 0
-                page_bytes = sample_data[f"page_{src_page}.png"]
-                
-                img = Image.open(io.BytesIO(page_bytes))
-                
-                page_tensors.append(self.model.encoder.page_encoder.prepare_input(
-                    img, self.bucket == Bucket.Training
-                ).unsqueeze(0))
-
-                ground_truth.append({
-                        "doc_id": str(doc_id),
-                        "doc_class": str(class_identifier),
-                        "page_nr": str(dst_page),
-                    }
-                )
-
-        page_tensors = page_tensors[:self.model.config.max_pages]
-        ground_truth = ground_truth[:self.model.config.max_pages]
 
         pixel_values = torch.cat(page_tensors)
 
