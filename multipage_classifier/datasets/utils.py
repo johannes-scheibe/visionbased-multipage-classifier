@@ -5,6 +5,6 @@ from pydantic import BaseModel
 
 
 class Bucket(Enum):
-    Training = "training"
-    Validation = "validation"
-    Testing = "testing"
+    Training = "Training"
+    Validation = "Validation"
+    Testing = "Testing"

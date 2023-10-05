@@ -31,7 +31,7 @@ class MosaicDataset(Dataset):
 
         self.prepare_function = prepare_function
 
-        with (self.path / f"{bucket.value}.txt").open("r") as file:
+        with (self.path / f"{bucket.value.lower()}.txt").open("r") as file:
             self.inventory = [Path(line.rstrip()) for line in file.readlines()]
 
         self.classes = classes

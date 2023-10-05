@@ -19,6 +19,7 @@ nltk = "^3.8.1"
 numpy = "^1.25.2"
 matplotlib = "^3.7.2"
 seaborn = "^0.12.2"
+treelib = "^1.7.0"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.20.2"
