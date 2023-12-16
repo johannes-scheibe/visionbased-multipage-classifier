@@ -32,11 +32,13 @@ class VisionEncoder(nn.Module):
             cfg.pretrained_model_name_or_path
         )
         config.image_size = cfg.image_size
-        self.model: ViTModel = ViTModel.from_pretrained(
+        model = ViTModel.from_pretrained(
             cfg.pretrained_model_name_or_path,
             config=config,
             ignore_mismatched_sizes=True,
         )
+        assert isinstance(model, ViTModel)
+        self.model: ViTModel = model
 
         self.hidden_dim = config.hidden_size
 

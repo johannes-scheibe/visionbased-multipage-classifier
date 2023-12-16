@@ -18,9 +18,7 @@ from multipage_classifier.encoder.multipage_encoder import MultipageEncoder
 from multipage_classifier.encoder.swin_encoder import SwinEncoder, SwinEncoderConfig
 
 
-class MultipageClassifierConfig(BaseModel):
-    image_size: tuple[int, int]
-
+class VisualPageClassifierConfig(BaseModel):
     num_classes: int 
     max_pages: int = 64
     max_page_nr: int = 96 # TODO adjust in dataset
@@ -30,12 +28,11 @@ class MultipageClassifierConfig(BaseModel):
     encoder_cfg: SwinEncoderConfig | None = None
     pretrained_encoder: str | None = None
     detached: bool = True
-    # Decoder params
     
 
-class MultipageClassifier(nn.Module):
+class VisualPageClassifier(nn.Module):
 
-    def __init__(self, config: MultipageClassifierConfig):
+    def __init__(self, config: VisualPageClassifierConfig):
         super().__init__()
 
         self.config = config

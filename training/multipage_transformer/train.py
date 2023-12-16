@@ -4,7 +4,7 @@ import torch
 from multipage_classifier.encoder.swin_encoder import SwinEncoderConfig
 import pytorch_lightning as pl
 from multipage_classifier.multipage_transformer import MultipageTransformerConfig
-from training.transformer.lightning_module import (
+from training.multipage_transformer.lightning_module import (
     MultipageTransformerPLModule,
     MultipagePLDataModule,
 )

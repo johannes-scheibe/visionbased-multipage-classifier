@@ -15,7 +15,6 @@ class SwinEncoderConfig(BaseModel):
     pretrained_model_name_or_path: str
     pretrained_model_type: Type[SwinModel] | Type[Swinv2Model] | Type[DonutSwinModel] = SwinModel
     dropout: float | None = 0.2
-    # TODO custom params if no path is specified
 
 class SwinEncoder(nn.Module):
     """

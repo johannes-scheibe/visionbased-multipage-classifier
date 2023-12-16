@@ -3,20 +3,20 @@ from inspect import signature
 from typing import Any, cast
 
 import torch
-from multipage_classifier.dual_classifier import DualClassifier, DualClassifierConfig, ORDER_NAMES
+from multipage_classifier.page_comparison_encoder import PageComparisonEncoder, PageComparisonConfig, ORDER_NAMES
 from utils.lightning import BaseLightningModule, Mode
 
 
 
-class DualClassifierPLModule(BaseLightningModule):
-    model: DualClassifier
+class PageComparisonEncoderPLModule(BaseLightningModule):
+    model: PageComparisonEncoder
 
-    def __init__(self, cfg: DualClassifierConfig):
+    def __init__(self, cfg: PageComparisonConfig):
         super().__init__()
         
         self.save_hyperparameters()
 
-        self.model: DualClassifier = DualClassifier(cfg)
+        self.model: PageComparisonEncoder = PageComparisonEncoder(cfg)
 
         self.model_input_keys = list(signature(self.model.forward).parameters.keys())
 

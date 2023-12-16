@@ -21,15 +21,15 @@ from sklearn.cluster import DBSCAN
 
 ORDER_NAMES = ["None", "Pred", "Succ", "Same"]
 
-class DualClassifierConfig(BaseModel):
+class PageComparisonConfig(BaseModel):
     num_classes: int 
     max_page_nr: int 
     encoder_cfg: SwinEncoderConfig
     
 
-class DualClassifier(nn.Module):
+class PageComparisonEncoder(nn.Module):
 
-    def __init__(self, config: DualClassifierConfig):
+    def __init__(self, config: PageComparisonConfig):
         super().__init__()
 
         self.config = config

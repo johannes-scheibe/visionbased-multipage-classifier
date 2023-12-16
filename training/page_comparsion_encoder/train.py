@@ -6,10 +6,10 @@ from multipage_classifier.encoder.swin_encoder import SwinEncoderConfig
 import pytorch_lightning as pl
 import torch
 from multipage_classifier.datasets.mosaic_dataset import MosaicDataModule
-from multipage_classifier.dual_classifier import DualClassifierConfig
+from multipage_classifier.page_comparison_encoder import PageComparisonConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
-from dual_classifier.lightning_module import DualClassifierPLModule
+from page_comparsion_encoder.lightning_module import PageComparisonEncoderPLModule
 from transformers import DonutSwinModel, Swinv2Model, SwinModel
 
 
@@ -39,7 +39,7 @@ if __name__ == "__main__":
     classes = [c for c in json.load(open(CLASS_PATH))]
 
     # Define encoder
-    swin_config = DualClassifierConfig(
+    swin_config = PageComparisonConfig(
         num_classes=len(classes),
         max_page_nr= 96,
         encoder_cfg=SwinEncoderConfig(
@@ -48,7 +48,7 @@ if __name__ == "__main__":
             pretrained_model_type=PRETRAINED_MODEL_TYPE
         )
     )
-    encoder_module = DualClassifierPLModule(swin_config)
+    encoder_module = PageComparisonEncoderPLModule(swin_config)
 
     # Define data module
     data_module = MosaicDataModule(Path(DATASET_PATH), classes, encoder_module.model.encoder.prepare_input, batch_size=BATCH_SIZE, max_pages=MAX_PAGES, num_workers=NUM_WORKERS)

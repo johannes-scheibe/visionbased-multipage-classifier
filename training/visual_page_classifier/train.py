@@ -2,20 +2,19 @@ import json
 from pathlib import Path
 
 import pytorch_lightning as pl
-from lightning_module import MultipageClassifierPLModule
+from visual_page_classifier.lightning_module import VisualPageClassifierPLModule
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from multipage_classifier.page_classifier import (
-    MultipageClassifier,
-    MultipageClassifierConfig,
+from multipage_classifier.visual_page_classifier import (
+    VisualPageClassifier,
+    VisualPageClassifierConfig,
 )
 
 from multipage_classifier.datasets.mosaic_dataset import MosaicDataModule
 
-from multipage_classifier.encoder.swin_encoder import SwinEncoderConfig
 
-NAME = "vision_based_page_classifier"
+NAME = "visual_page_classifier"
 
 DATASET_PATH = "/data/training/master_thesis/datasets/2023-05-23"
 CLASS_PATH = "/data/training/master_thesis/datasets/bzuf_classes.json"
@@ -33,21 +32,14 @@ if __name__ == "__main__":
     # BZUF classes
     classes = [c for c in json.load(open(CLASS_PATH))]
 
-    # # Define Model
-    # swin_config = SwinEncoderConfig(
-    #     image_size=IMAGE_SIZE,
-    #     pretrained_model_name_or_path=PRETRAINED_ENCODER
-    # )
-
-    config = MultipageClassifierConfig(
+    config = VisualPageClassifierConfig(
         num_classes=len(classes),
         max_pages=MAX_PAGES,
-        # encoder_cfg=swin_config,
         pretrained_encoder=str(Path(PRETRAINED_ENCODER) / "model.path"),
         detached=True,
     )
 
-    model = MultipageClassifierPLModule(config)
+    model = VisualPageClassifierPLModule(config)
 
     data_module = MosaicDataModule(
         Path(DATASET_PATH),

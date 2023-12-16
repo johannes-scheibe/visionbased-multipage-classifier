@@ -5,18 +5,18 @@ import torch
 import torch.nn.functional as F
 
 
-from multipage_classifier.page_classifier import (MultipageClassifier,
-                                                  MultipageClassifierConfig)
+from multipage_classifier.visual_page_classifier import (VisualPageClassifier,
+                                                  VisualPageClassifierConfig)
 from utils.lightning import BaseLightningModule
 
-class MultipageClassifierPLModule(BaseLightningModule):
+class VisualPageClassifierPLModule(BaseLightningModule):
     
-    def __init__(self, config: MultipageClassifierConfig):
+    def __init__(self, config: VisualPageClassifierConfig):
         super().__init__()
 
         self.config = config
 
-        self.classifier = MultipageClassifier(config)
+        self.classifier = VisualPageClassifier(config)
 
         self.set_default_metrics("doc_class", task="multiclass", num_classes=self.config.num_classes)        
         self.set_default_metrics("page_nr", task="multiclass", num_classes=self.config.max_page_nr)        

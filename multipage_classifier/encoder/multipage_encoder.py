@@ -15,7 +15,7 @@ class EncoderOutput(BaseModel):
 class MultipageEncoder(nn.Module):
     def __init__(
         self,
-        encoder: SwinEncoder,  # TODO support general encoders
+        encoder: SwinEncoder,
         max_pages: int,
         detached: bool = False
     ):
