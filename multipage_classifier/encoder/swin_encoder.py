@@ -14,7 +14,7 @@ class SwinEncoderConfig(BaseModel):
     image_size: tuple[int, int]
     pretrained_model_name_or_path: str
     pretrained_model_type: Type[SwinModel] | Type[Swinv2Model] | Type[DonutSwinModel] = SwinModel
-
+    dropout: float | None = 0.2
     # TODO custom params if no path is specified
 
 class SwinEncoder(nn.Module):
@@ -27,6 +27,7 @@ class SwinEncoder(nn.Module):
         cfg: SwinEncoderConfig
     ):
         super().__init__()
+        self.config = cfg
         
         config = AutoConfig.from_pretrained(cfg.pretrained_model_name_or_path)
         config.image_size = cfg.image_size
@@ -34,15 +35,24 @@ class SwinEncoder(nn.Module):
         
         self.hidden_dim = self.model.num_features
         
+        self.dropout = (
+            torch.nn.Dropout(self.config.dropout)
+            if self.config.dropout is not None
+            else torch.nn.Identity()
+        )
+
     def forward(self, pixel_values: torch.Tensor, return_pooled_output: bool = True) -> torch.Tensor:
         """
         Args:
             x: (batch_size, num_channels, height, width)
-        """
+        """ 
         out = self.model(pixel_values)
-        if return_pooled_output:
-            return out.pooler_output
-        return out.last_hidden_state
+
+        embs =  out.pooler_output
+
+        embs = self.dropout(embs)
+
+        return embs
 
     def prepare_input(self, img: Image.Image, align_long_axis = True) -> torch.Tensor:
         img = img.convert("RGB")
