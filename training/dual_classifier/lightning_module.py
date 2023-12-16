@@ -24,8 +24,8 @@ class DualClassifierPLModule(BaseLightningModule):
         
         self.set_default_metrics("order", task="multiclass", num_classes=len(ORDER_NAMES))        
         self.set_default_metrics("page_nr", task="multiclass", num_classes=self.config.max_page_nr)        
-        self.set_default_metrics("doc_id", task="multilabel", num_labels=self.config.max_page_nr, confmat=False)        
-        self.set_default_metrics("doc_class", task="multiclass", num_labels=self.config.num_classes, confmat=False)        
+        self.set_default_metrics("doc_id", task="multiclass", num_classes=self.config.max_page_nr, confmat=False)        
+        self.set_default_metrics("doc_class", task="multiclass", num_classes=self.config.num_classes, confmat=False)        
 
     def step(self, batch: Any, *_):
         pred= self.model.forward(batch["pixel_values"])
@@ -64,6 +64,17 @@ class DualClassifierPLModule(BaseLightningModule):
         preds = self.model.postprocess(preds)
         gt["doc_id"] = batch["doc_id"]
         gt["page_nr"] = batch["page_nr"]
+
+        for k in ["doc_id", "page_nr"]:
+            pred = preds[k]
+
+            # Create an empty target tensor with the desired shape
+            target_tensor = torch.zeros((len(pred), self.config.max_page_nr), device=self.device)
+
+            # Use scatter_ to set 1 at specific indices for each row
+            target_tensor.scatter_(1, pred.unsqueeze(1), 1)
+
+            preds[k] = target_tensor
 
         self.update_metrics(preds, gt)
         return self.log_losses(losses)

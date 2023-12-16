@@ -140,9 +140,12 @@ class BaseLightningModule(pl.LightningModule):
 
     def update_metrics(self, pred: Dict, gt):
         for k, m in self.metrics[f"_{self.mode.value}"].items(): # type: ignore
+            if k not in pred or k not in gt:
+                continue
             m.update(pred[k], gt[k])
         for k, c in self.confmat[f"_{self.mode.value}"].items(): # type: ignore
-            c.update(pred[k], gt[k])
+            if k in pred and k in gt:
+                c.update(pred[k], gt[k])
 
     def log_metrics(self, metrics: Dict):
         self.log_dict(

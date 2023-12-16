@@ -45,27 +45,32 @@ class DualClassifier(nn.Module):
             config.encoder_cfg
         )
 
+        # self.order_head = torch.nn.Sequential(
+        #     torch.nn.Linear(self.encoder.hidden_dim * 2,  len(ORDER_NAMES)),
+        #     torch.nn.ReLU(),
+        #     torch.nn.Linear( len(ORDER_NAMES), len(ORDER_NAMES))
+        # )
+
+        # self.classification_head = torch.nn.Sequential(
+        #     torch.nn.Linear(self.encoder.hidden_dim, self.config.num_classes),
+        #     torch.nn.ReLU(),
+        #     torch.nn.Linear(self.config.num_classes, self.config.num_classes)
+        # )
+
         self.order_head = torch.nn.Sequential(
             torch.nn.Linear(self.encoder.hidden_dim * 2, 768),
             torch.nn.ReLU(),
             torch.nn.Linear(768, len(ORDER_NAMES))
         )
-
-        # self.classification_head = torch.nn.Sequential(
-        #     torch.nn.Linear(self.encoder.hidden_dim, 768),
-        #     torch.nn.ReLU(),
-        #     torch.nn.Linear(768, self.config.num_classes)
-        # )
+        
         
         self.classification_head = torch.nn.Sequential(
             torch.nn.Linear(self.encoder.hidden_dim, 768),
             torch.nn.ReLU(),
-            torch.nn.Linear(768, 1536),
-            torch.nn.ReLU(),
-            torch.nn.Linear(1536, 768),
-            torch.nn.ReLU(),
             torch.nn.Linear(768, self.config.num_classes)
         )
+        
+
         
         self.cluster_prediction = DBSCAN(
             min_samples=1, metric="precomputed"
@@ -92,12 +97,10 @@ class DualClassifier(nn.Module):
         preds = self.postprocess(preds)
         return preds
 
-    def postprocess(self, preds) -> dict:
-        bs = len(preds["doc_class"])
+    def postprocess(self, preds) -> dict[str, torch.Tensor]:
+        bs =len(preds["doc_class"])
 
         order_mat = torch.exp(preds["order"]).view(-1, bs, 4)
-        print("postprocess")
-        print(order_mat.size())
 
         preds["doc_id"] = torch.tensor(self.compute_doc_ids(order_mat), device=order_mat.device)
 
@@ -105,14 +108,10 @@ class DualClassifier(nn.Module):
         page_nrs = []
         for doc_id in torch.unique(preds["doc_id"]):
             indices = torch.nonzero(preds["doc_id"] == doc_id).reshape(-1)
-            sub_order_mat =  order_mat[indices][:, indices]   
-            print(sub_order_mat.size())
-
+            sub_order_mat = order_mat[indices][:,indices]   
             sub_page_nrs = self.compute_page_nrs(sub_order_mat)
-            
             page_nrs.extend(sub_page_nrs)
 
-        print("page_nrs", page_nrs)
         preds["page_nr"] = torch.tensor(page_nrs, device=order_mat.device)
 
         return preds
@@ -126,16 +125,13 @@ class DualClassifier(nn.Module):
 
         doc_ids = self.cluster_prediction.fit_predict(doc_id_probs.cpu().data.numpy())
         
-        print("doc_ids", doc_ids.tolist())
         return doc_ids.tolist()
     
     
     def compute_page_nrs(self, order_matrix: torch.Tensor) -> list[int]:
         # extract "pred" and "succ" prediction. NOTE this changes the indices -> ["Pred", "Succ"]
         page_nr_probs = order_matrix[:, :, 1:3] 
-        print("PAGE_NR_MAT")
-        print(page_nr_probs)
-
+ 
         # Make "page order symetric": 0 maps to 1 and the other way arround
         bs = len(page_nr_probs)
         for i in range(bs):
@@ -156,9 +152,23 @@ class DualClassifier(nn.Module):
                     elif page_nr_preds[i, j] == 1:  # i is successor
                         graph[j].append(i)
 
-        # Perform topological sorting using Kahn's algorithm
+        def clean_graph(graph, visited: list[int], successors: list[int]):
+            # Remove circles for a specific node. Because the graph contains all successors for a node we can just remove occurences in the successors
+            for succ in successors:
+                for node in visited:
+                    if node in graph[succ]: 
+                        graph[succ].remove(node)
+                    
+                graph = clean_graph(graph, visited+[succ], graph[succ])
+            return graph
 
-        # Count the numbner of incomming edges
+        # TODO clean based on probs and distance between pages
+        for node in range(bs):
+            graph = clean_graph(graph, [node], graph[node])
+        
+        # Perform topological sorting using an adapted Kahn's algorithm 
+
+        # Count the number of incoming edges
         in_degree = [0] * bs
         for node, neighbors in graph.items():
             for neighbor in neighbors:
@@ -166,15 +176,17 @@ class DualClassifier(nn.Module):
 
         # List of "start nodes" which have no incoming edges
         queue = deque([node for node, degree in enumerate(in_degree) if degree == 0])
-        
         topological_order: list[int] = []
         while queue:
             node = queue.popleft()
+
             topological_order.append(node)
 
             for neighbor in graph[node]:
                 in_degree[neighbor] -= 1
                 if in_degree[neighbor] == 0:
                     queue.append(neighbor)
-        print("sub_nr", topological_order)
+        
+        assert len(topological_order) == len(graph)
+
         return topological_order
