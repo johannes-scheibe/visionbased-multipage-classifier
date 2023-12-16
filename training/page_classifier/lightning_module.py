@@ -55,10 +55,15 @@ class MultipageClassifierPLModule(BaseLightningModule):
         return preds, gt, losses
 
     def configure_optimizers(self):
-        lr = 3e-5
-
-        optimizer = torch.optim.AdamW(self.parameters(), lr=lr)
-        return [optimizer]
+        lr: float = 2e-5
+        weight_decay: float = 1e-4
+        lr_decay: float = 1
+        
+        optimizer = torch.optim.AdamW(
+            self.parameters(), lr=lr, weight_decay=weight_decay
+        )
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, lr_decay)
+        return [optimizer], [scheduler]
 
 
 def sigmoid_focal_loss(inputs, targets, alpha: float = 0.50, gamma: float = 2):
