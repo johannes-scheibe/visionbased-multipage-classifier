@@ -20,13 +20,12 @@ class SwinEncoderPLModule(BaseLightningModule):
         self.model_input_keys = list(signature(self.encoder.forward).parameters.keys())
 
         self.order_head = torch.nn.Sequential(
-            torch.nn.Linear(self.encoder.hidden_dim * 2, 768),
+            torch.nn.Linear(self.encoder.hidden_dim * 2, len(ORDER_NAMES)),
             torch.nn.ReLU(),
-            torch.nn.Linear(768, len(ORDER_NAMES))
+            torch.nn.Linear(len(ORDER_NAMES), len(ORDER_NAMES))
         )
 
         self.set_default_metrics("order", task="multiclass", num_classes=len(ORDER_NAMES))
-
 
 
     def forward(self, batch, **kwargs) -> torch.Tensor:
