@@ -12,20 +12,20 @@ from transformers import AutoConfig, DonutSwinModel, Swinv2Model, SwinModel
 
 from transformers import MBartConfig, MBartForCausalLM, MBartTokenizer
 
-NAME = "multipage_transformer"
+NAME = "donut_inspired_transformer"
 
 DATASET_PATH = "/data/training/master_thesis/datasets/2023-05-23"
 CLASS_PATH = "/data/training/master_thesis/datasets/bzuf_classes.json"
-LIGHTNING_PATH = "/data/training/master_thesis/lightning_logs"
+LIGHTNING_PATH = "/data/training/master_thesis/evaluation_logs"
 
 
-N_EPOCHS = 30
-MAX_PAGES = 16
+N_EPOCHS = 25
+MAX_PAGES = 32
 NUM_WORKERS = 4
 
 TASK_PROMPT = "<s_classification>"
 
-PRETRAINED_ENCODER = "/data/training/master_thesis/models/swin-encoder-pretrained/model.bin"
+PRETRAINED_ENCODER = "/data/training/master_thesis/evaluation_logs/swin_encoder/microsoft/swinv2-base-patch4-window8-256/version_1/model.path"
 MAX_LENGTH = 768
 DETACHED = True
 
@@ -39,7 +39,9 @@ config = MultipageTransformerConfig(
     max_pages=MAX_PAGES,
     pretrained_encoder=PRETRAINED_ENCODER,
     detached=DETACHED,
-    special_tokens=special_tokens
+    special_tokens=special_tokens,
+    decoder_name_or_path="facebook/bart-base"
+    # decoder_name_or_path="hyunwoongko/asian-bart-ecjk"
 )
 
 model = MultipageTransformerPLModule(config)
@@ -57,7 +59,7 @@ checkpoint_callback = ModelCheckpoint(
     filename="best-checkpoint",
     save_top_k=1,
     verbose=True,
-    monitor="val_metric",
+    monitor="val/edit_distance",
     mode="min",
     save_last=True,
 )
@@ -67,7 +69,7 @@ logger = TensorBoardLogger(LIGHTNING_PATH, name=NAME)
 
 trainer = pl.Trainer(
     accelerator="gpu",
-    devices=[1],
+    devices=[0],
     logger=logger,
     max_epochs=N_EPOCHS,
     callbacks=[checkpoint_callback]

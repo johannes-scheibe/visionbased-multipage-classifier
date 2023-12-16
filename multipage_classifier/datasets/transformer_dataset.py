@@ -46,7 +46,7 @@ class TransformerDataset(Dataset):
         self.path = path
         self.bucket = bucket
 
-        with (self.path / f"{bucket.value}.txt").open("r") as file:
+        with (self.path / f"{bucket.value.lower()}.txt").open("r") as file:
             self.inventory = [Path(line.rstrip()) for line in file.readlines()]
 
         self.model = model
@@ -77,7 +77,7 @@ class TransformerDataset(Dataset):
         page_tensors: list[torch.Tensor] = []
         ground_truth: list[dict[str, str]] = []
 
-        doc_id_offset = ground_truth[0]["doc_id"]
+        doc_id_offset = sample[0]["doc_id"]
         for sample in batch:
             
             src_page = sample["src_page"]

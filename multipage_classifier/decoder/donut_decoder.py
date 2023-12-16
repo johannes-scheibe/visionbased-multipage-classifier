@@ -44,23 +44,27 @@ class BARTDecoder(nn.Module):
         self, decoder_layer: int, hidden_dim: int, max_position_embeddings: int, special_tokens: list[str],  name_or_path: str | None = None # TODO name_or_path implementation
     ):
         super().__init__()
-
-
         
         self.tokenizer: MBartTokenizer = MBartTokenizer.from_pretrained("facebook/mbart-large-en-ro")
-        self.model = MBartForCausalLM(
-            config=MBartConfig(
-                is_decoder=True,
-                is_encoder_decoder=False,
-                add_cross_attention=True,
-                decoder_layers=decoder_layer,
-                max_position_embeddings=max_position_embeddings,
-                vocab_size=len(self.tokenizer),
-                scale_embedding=True,
-                add_final_layer_norm=True,
-                d_model=hidden_dim
-            )
+        config=MBartConfig(
+            is_decoder=True,
+            is_encoder_decoder=False,
+            add_cross_attention=True,
+            decoder_layers=decoder_layer,
+            max_position_embeddings=max_position_embeddings,
+            vocab_size=len(self.tokenizer),
+            scale_embedding=True,
+            add_final_layer_norm=True,
+            d_model=hidden_dim
         )
+        if name_or_path:
+            model = MBartForCausalLM.from_pretrained(name_or_path, config=config, ignore_mismatched_sizes=True)
+        else:
+            model = MBartForCausalLM(config=config)
+
+        assert isinstance(model, MBartForCausalLM)
+        self.model = model
+
         self.model.forward = self.forward  #  to get cross attentions and utilize `generate` function
 
         self.add_special_tokens(special_tokens)

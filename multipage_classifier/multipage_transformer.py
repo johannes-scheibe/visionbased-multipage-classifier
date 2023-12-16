@@ -10,11 +10,11 @@ from pydantic import BaseModel
 from torchvision import transforms
 from multipage_classifier.decoder.donut_decoder import BARTDecoder
 
+
 class MultipageTransformerConfig(BaseModel):
     class Config:
         arbitrary_types_allowed = True
         
-    
     max_pages: int = 64
     max_seq_len: int = 768
 
@@ -66,11 +66,10 @@ class MultipageTransformer(nn.Module):
         decoder_input_ids: torch.Tensor,
         decoder_labels: torch.Tensor,
     ):  
-        encoder_outputs = self.encoder.forward(image_tensors)
-
+        encoder_outputs = self.encoder.forward(image_tensors[0]).unsqueeze(0)
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=encoder_outputs.last_hidden_state,
+            encoder_hidden_states=encoder_outputs,
             labels=decoder_labels,
         ) 
 
@@ -94,8 +93,8 @@ class MultipageTransformer(nn.Module):
         """
         encoder_outputs = self.encoder.forward(image_tensors)
 
-        if len(encoder_outputs.last_hidden_state.size()) == 1:
-            encoder_outputs.last_hidden_state = encoder_outputs.last_hidden_state.unsqueeze(0)
+        if len(encoder_outputs.size()) == 1:
+            encoder_outputs = encoder_outputs.unsqueeze(0)
         if len(prompt_tensors.size()) == 1:
             prompt_tensors = prompt_tensors.unsqueeze(0)
 
@@ -103,7 +102,7 @@ class MultipageTransformer(nn.Module):
         # get decoder output
         decoder_output = self.decoder.model.generate(
             input_ids=prompt_tensors,
-            encoder_hidden_states=encoder_outputs.last_hidden_state,
+            encoder_hidden_states=encoder_outputs,
             max_length=self.config.max_seq_len,
             early_stopping=True,
             pad_token_id=self.decoder.tokenizer.pad_token_id,

@@ -39,6 +39,8 @@ class MultipageTransformerPLModule(BaseLightningModule):
         decoder_input_ids = batch["decoder_input_ids"][:, :-1]
         decoder_labels = batch["decoder_labels"][:, 1:]
 
+        assert len(image_tensors) == 1 and len(decoder_input_ids) == 1, "batch size > 1 not supported"
+
         loss = self.model(image_tensors, decoder_input_ids, decoder_labels)[0]
         self.log_dict({"train_loss": loss}, sync_dist=True)
         return loss
@@ -58,9 +60,11 @@ class MultipageTransformerPLModule(BaseLightningModule):
             batch_first=True,
         )
 
+        assert len(image_tensors) == 1 and len(decoder_prompts) == 1, "batch size > 1 not supported"
+
         preds = self.model.inference(
-            image_tensors=image_tensors,
-            prompt_tensors=decoder_prompts,
+            image_tensors=image_tensors[0],
+            prompt_tensors=decoder_prompts[0],
             return_json=False,
         )["predictions"]
 
