@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 
 from multipage_classifier.encoder.swin_encoder import SwinEncoder
+from multipage_classifier.encoder.vision_encoder import VisionEncoder
 
 class EncoderOutput(BaseModel):
     class Config:
@@ -15,14 +16,14 @@ class EncoderOutput(BaseModel):
 class MultipageEncoder(nn.Module):
     def __init__(
         self,
-        encoder: SwinEncoder,
+        encoder: SwinEncoder | VisionEncoder,
         max_pages: int,
         detached: bool = False
     ):
         super().__init__()
         self.detached = detached
         
-        self.page_encoder = encoder
+        self.page_encoder: SwinEncoder | VisionEncoder = encoder
 
         self.hidden_dim: int = self.page_encoder.hidden_dim
 

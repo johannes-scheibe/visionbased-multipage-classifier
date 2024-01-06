@@ -15,7 +15,6 @@ from PIL import Image
 from torch.utils.data import Dataset
 
 
-
 class TransformerSample(BaseModel):
     class Config:
         arbitrary_types_allowed = True
@@ -27,14 +26,15 @@ class TransformerSample(BaseModel):
     target_sequence: str
     ground_truth: list[dict]
 
+
 class TransformerDataset(Dataset):
     sample_info_file_name: str = "sample.json"
+
     def __init__(
         self,
-        path: Path, 
+        path: Path,
         bucket: Bucket,
         model: MultipageTransformer,
-
         split: str = "train",
         ignore_id: int = -100,
         task_start_token: str = "<s_cls>",
@@ -68,26 +68,28 @@ class TransformerDataset(Dataset):
 
     def __getitem__(self, idx: int) -> TransformerSample:
         sample_path = self.path / self.inventory[idx]
-        
+
         sample = json.load(open(sample_path / "ground_truth.json"))
 
         offset = random.randint(0, max(0, (len(sample) - self.model.config.max_pages)))
         batch = sample[offset : offset + self.model.config.max_pages]
-        
+
         page_tensors: list[torch.Tensor] = []
         ground_truth: list[dict[str, str]] = []
 
         doc_id_offset = sample[0]["doc_id"]
         for sample in batch:
-            
             src_page = sample["src_page"]
             img = Image.open(sample_path / f"page_{src_page}.png")
-                
-            page_tensors.append(self.model.encoder.page_encoder.prepare_input(
-                img, self.bucket == Bucket.Training
-            ).unsqueeze(0))
 
-            ground_truth.append({
+            page_tensors.append(
+                self.model.encoder.page_encoder.prepare_input(
+                    img, self.bucket == Bucket.Training
+                ).unsqueeze(0)
+            )
+
+            ground_truth.append(
+                {
                     "doc_id": str(sample["doc_id"] - doc_id_offset),
                     "doc_class": str(sample["doc_class"]),
                     "page_nr": str(sample["page_nr"]),
@@ -101,7 +103,7 @@ class TransformerDataset(Dataset):
             + self.model.json2token(
                 ground_truth,
                 sort_json_key=self.sort_json_key,
-                update_special_tokens_for_json_key=False
+                update_special_tokens_for_json_key=False,
             )
             + self.model.decoder.tokenizer.eos_token
         )
@@ -124,16 +126,13 @@ class TransformerDataset(Dataset):
             : torch.nonzero(labels == self.prompt_end_token_id).sum() + 1
         ] = self.ignore_id  # model doesn't need to predict prompt (for VQA)
 
-        
         prompt_end_index = torch.nonzero(input_ids == self.prompt_end_token_id).sum()
-        
+
         return TransformerSample(
             pixel_values=pixel_values,
             decoder_input_ids=input_ids,
             prompt_end_index=prompt_end_index,
             decoder_labels=labels,
             target_sequence=target_sequence,
-            ground_truth=ground_truth
+            ground_truth=ground_truth,
         )
-
-        

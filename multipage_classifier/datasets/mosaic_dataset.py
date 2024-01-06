@@ -44,7 +44,6 @@ class MosaicDataset(Dataset):
         return len(self.inventory)
 
     def __getitem__(self, idx: int):
-
         sample_path = self.path / self.inventory[idx]
 
         ground_truth = json.load(open(sample_path / "ground_truth.json"))
@@ -54,9 +53,9 @@ class MosaicDataset(Dataset):
 
         doc_id_offset = ground_truth[0]["doc_id"]
         for sample in batch:
-            sample["letter_id"] = idx # TODO maybe use str2int mapping
+            sample["letter_id"] = idx  # TODO maybe use str2int mapping
             sample["doc_id"] -= doc_id_offset  # doc_ids should start at 0
-            sample["doc_class"] = self.class2id[sample["doc_class"]]        
+            sample["doc_class"] = self.class2id[sample["doc_class"]]
             src_page = sample["src_page"]
             img = Image.open(sample_path / f"page_{src_page}.png")
             sample["pixel_values"] = self.prepare_function(img)

@@ -21,7 +21,7 @@ class VisionEncoderConfig(BaseModel):
 
 class VisionEncoder(nn.Module):
     """
-    Wrapper for the transformers SwinModel.
+    Wrapper for the transformers VisionTransformer.
     """
 
     def __init__(self, cfg: VisionEncoderConfig):

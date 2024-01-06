@@ -66,5 +66,5 @@ class DocumentSeparator(nn.Module):
             self.get_groups(preds["doc_id"].cpu().data.numpy()), device=preds["doc_id"].device
         )
         out["doc_id_prob"] = (preds["doc_id"] - 0.5).abs().mean() * 2
-
+        
         return out

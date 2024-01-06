@@ -4,25 +4,17 @@ Copyright (c) 2022-present NAVER Corp.
 MIT License
 """
 
-import math
-import os
-import re
-from typing import Any, List, Optional, Union
 
-import numpy as np
-import PIL
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from PIL import ImageOps
-
-from torchvision import transforms
-from torchvision.transforms.functional import resize, rotate
 
 from transformers.file_utils import ModelOutput
 
 from transformers import MBartConfig, MBartForCausalLM, MBartTokenizer
+
 
 class BARTDecoder(nn.Module):
     """
@@ -41,12 +33,19 @@ class BARTDecoder(nn.Module):
     """
 
     def __init__(
-        self, decoder_layer: int, hidden_dim: int, max_position_embeddings: int, special_tokens: list[str],  name_or_path: str | None = None # TODO name_or_path implementation
+        self,
+        decoder_layer: int,
+        hidden_dim: int,
+        max_position_embeddings: int,
+        special_tokens: list[str],
+        name_or_path: str | None = None,  # TODO name_or_path implementation
     ):
         super().__init__()
-        
-        self.tokenizer: MBartTokenizer = MBartTokenizer.from_pretrained("facebook/mbart-large-en-ro")
-        config=MBartConfig(
+
+        self.tokenizer: MBartTokenizer = MBartTokenizer.from_pretrained(
+            "facebook/mbart-large-en-ro"
+        )
+        config = MBartConfig(
             is_decoder=True,
             is_encoder_decoder=False,
             add_cross_attention=True,
@@ -55,34 +54,49 @@ class BARTDecoder(nn.Module):
             vocab_size=len(self.tokenizer),
             scale_embedding=True,
             add_final_layer_norm=True,
-            d_model=hidden_dim
+            d_model=hidden_dim,
         )
         if name_or_path:
-            model = MBartForCausalLM.from_pretrained(name_or_path, config=config, ignore_mismatched_sizes=True)
+            model = MBartForCausalLM.from_pretrained(
+                name_or_path, config=config, ignore_mismatched_sizes=True
+            )
         else:
             model = MBartForCausalLM(config=config)
 
         assert isinstance(model, MBartForCausalLM)
         self.model = model
 
-        self.model.forward = self.forward  #  to get cross attentions and utilize `generate` function
+        self.model.forward = (
+            self.forward
+        )  #  to get cross attentions and utilize `generate` function
 
         self.add_special_tokens(special_tokens)
-        
-        self.add_special_tokens(["<sep/>"])  # <sep/> is used for representing a list in a JSON
+
+        self.add_special_tokens(
+            ["<sep/>"]
+        )  # <sep/> is used for representing a list in a JSON
         self.model.model.decoder.embed_tokens.padding_idx = self.tokenizer.pad_token_id
         self.model.prepare_inputs_for_generation = self.prepare_inputs_for_inference
-
 
     def add_special_tokens(self, list_of_tokens: List[str]):
         """
         Add special tokens to tokenizer and resize the token embeddings
         """
-        newly_added_num = self.tokenizer.add_special_tokens({"additional_special_tokens": sorted(set(list_of_tokens))})
+        newly_added_num = self.tokenizer.add_special_tokens(
+            {"additional_special_tokens": sorted(set(list_of_tokens))}
+        )
         if newly_added_num > 0:
             self.model.resize_token_embeddings(len(self.tokenizer))
 
-    def prepare_inputs_for_inference(self, input_ids: torch.Tensor, encoder_hidden_states: torch.Tensor, past_key_values=None, past=None, use_cache: bool = None, attention_mask: torch.Tensor = None):
+    def prepare_inputs_for_inference(
+        self,
+        input_ids: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        past_key_values=None,
+        past=None,
+        use_cache: bool = None,
+        attention_mask: torch.Tensor = None,
+    ):
         """
         Args:
             input_ids: (batch_size, sequence_lenth)
@@ -136,11 +150,22 @@ class BARTDecoder(nn.Module):
             decoder_attentions: (batch_size, num_heads, sequence_length, sequence_length)
             cross_attentions: (batch_size, num_heads, sequence_length, sequence_length)
         """
-        output_attentions = output_attentions if output_attentions is not None else self.model.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.model.config.output_hidden_states
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.model.config.output_attentions
         )
-        return_dict = return_dict if return_dict is not None else self.model.config.use_return_dict
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.model.config.output_hidden_states
+        )
+        return_dict = (
+            return_dict
+            if return_dict is not None
+            else self.model.config.use_return_dict
+        )
+
         outputs = self.model.model.decoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -157,7 +182,9 @@ class BARTDecoder(nn.Module):
         loss = None
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
-            loss = loss_fct(logits.view(-1, self.model.config.vocab_size), labels.view(-1))
+            loss = loss_fct(
+                logits.view(-1, self.model.config.vocab_size), labels.view(-1)
+            )
 
         if not return_dict:
             output = (logits,) + outputs[1:]

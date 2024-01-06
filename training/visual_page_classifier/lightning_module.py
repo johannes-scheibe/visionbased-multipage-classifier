@@ -1,16 +1,16 @@
 from typing import Any
 
-import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 
-
-from multipage_classifier.visual_page_classifier import (VisualPageClassifier,
-                                                  VisualPageClassifierConfig)
+from multipage_classifier.visual_page_classifier import (
+    VisualPageClassifier,
+    VisualPageClassifierConfig,
+)
 from utils.lightning import BaseLightningModule
 
+
 class VisualPageClassifierPLModule(BaseLightningModule):
-    
     def __init__(self, config: VisualPageClassifierConfig):
         super().__init__()
 
@@ -18,13 +18,21 @@ class VisualPageClassifierPLModule(BaseLightningModule):
 
         self.classifier = VisualPageClassifier(config)
 
-        self.set_default_metrics("doc_class", task="multiclass", num_classes=self.config.num_classes)        
-        self.set_default_metrics("page_nr", task="multiclass", num_classes=self.config.max_page_nr)        
-        self.set_default_metrics("doc_id", task="multilabel", num_labels=self.config.max_pages, confmat=False)        
+        self.set_default_metrics(
+            "doc_class", task="multiclass", num_classes=self.config.num_classes
+        )
+        self.set_default_metrics(
+            "page_nr", task="multiclass", num_classes=self.config.max_page_nr
+        )
+        self.set_default_metrics(
+            "doc_id", task="multilabel", num_labels=self.config.max_pages, confmat=False
+        )
 
         self.save_hyperparameters()
 
-    def step(self, batch: Any, *_) -> tuple[
+    def step(
+        self, batch: Any, *_
+    ) -> tuple[
         dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor]
     ]:
         batch_size = len(batch["doc_id"])
@@ -35,13 +43,14 @@ class VisualPageClassifierPLModule(BaseLightningModule):
         # Ground truth
         gt = {}
         gt.update({k: batch[k] for k in self.classifier.separator.heads.keys()})
-        
+
         doc_ids = batch["doc_id"]
         doc_ids = torch.cat(
             [
                 doc_ids,
-                torch.tensor([-1] * (self.config.max_pages -
-                             len(doc_ids)), device=self.device),
+                torch.tensor(
+                    [-1] * (self.config.max_pages - len(doc_ids)), device=self.device
+                ),
             ]
         )
         gt["doc_id"] = (doc_ids[:batch_size].view(-1, 1) == doc_ids.view(1, -1)).int()
@@ -58,7 +67,7 @@ class VisualPageClassifierPLModule(BaseLightningModule):
         lr: float = 2e-5
         weight_decay: float = 1e-4
         lr_decay: float = 1
-        
+
         optimizer = torch.optim.AdamW(
             self.parameters(), lr=lr, weight_decay=weight_decay
         )
@@ -83,8 +92,7 @@ def sigmoid_focal_loss(inputs, targets, alpha: float = 0.50, gamma: float = 2):
         Loss tensor
     """
     prob = inputs  # .sigmoid()
-    ce_loss = F.binary_cross_entropy_with_logits(
-        inputs, targets, reduction="none")
+    ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
     p_t = prob * targets + (1 - prob) * (1 - targets)
     loss = ce_loss * ((1 - p_t) ** gamma)
 
