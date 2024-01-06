@@ -12,7 +12,7 @@ from transformers import AutoConfig, DonutSwinModel, Swinv2Model, SwinModel
 
 from transformers import MBartConfig, MBartForCausalLM, MBartTokenizer
 
-NAME = "donut_inspired_transformer"
+NAME = "multipage_transformer"
 
 DATASET_PATH = "/data/training/master_thesis/datasets/2023-05-23"
 CLASS_PATH = "/data/training/master_thesis/datasets/bzuf_classes.json"
@@ -21,7 +21,7 @@ LIGHTNING_PATH = "/data/training/master_thesis/evaluation_logs"
 
 N_EPOCHS = 25
 MAX_PAGES = 32
-NUM_WORKERS = 4
+NUM_WORKERS = 8
 
 TASK_PROMPT = "<s_classification>"
 
@@ -40,16 +40,19 @@ config = MultipageTransformerConfig(
     pretrained_encoder=PRETRAINED_ENCODER,
     detached=DETACHED,
     special_tokens=special_tokens,
-    decoder_name_or_path="facebook/bart-base"
-    # decoder_name_or_path="hyunwoongko/asian-bart-ecjk"
+    # decoder_name_or_path = "/data/training/master_thesis/models/naver-clova-ix/donut-bart-base/model.path"
+    # decoder_name_or_path="facebook/bart-base"
+    decoder_name_or_path="hyunwoongko/asian-bart-ecjk",
 )
 
 model = MultipageTransformerPLModule(config)
 
-data_module = MultipagePLDataModule(Path(DATASET_PATH), model.model,  task_prompt=TASK_PROMPT, num_workers=NUM_WORKERS) 
+data_module = MultipagePLDataModule(
+    Path(DATASET_PATH), model.model, task_prompt=TASK_PROMPT, num_workers=NUM_WORKERS
+)
 
 data_module.prepare_data()
-data_module.setup() # ensure tokens are configured 
+data_module.setup()  # ensure tokens are configured
 
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -69,10 +72,10 @@ logger = TensorBoardLogger(LIGHTNING_PATH, name=NAME)
 
 trainer = pl.Trainer(
     accelerator="gpu",
-    devices=[0],
+    devices=[2],
     logger=logger,
     max_epochs=N_EPOCHS,
-    callbacks=[checkpoint_callback]
+    callbacks=[checkpoint_callback],
 )
 
 trainer.fit(model, data_module)

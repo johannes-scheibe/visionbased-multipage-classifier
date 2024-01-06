@@ -7,7 +7,6 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from multipage_classifier.visual_page_classifier import (
-    VisualPageClassifier,
     VisualPageClassifierConfig,
 )
 
@@ -26,7 +25,7 @@ NUM_WORKERS = 8
 BATCH_SIZE = 1
 
 IMAGE_SIZE = (704, 512)
-PRETRAINED_ENCODER = "/data/training/master_thesis/evaluation_logs/swin_encoder/microsoft/swinv2-base-patch4-window8-256/version_1/"
+PRETRAINED_ENCODER = "/data/training/master_thesis/evaluation_logs/vision_encoder/google/vit-base-patch16-224/version_0"
 
 if __name__ == "__main__":
     # BZUF classes
