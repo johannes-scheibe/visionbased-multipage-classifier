@@ -14,7 +14,7 @@ from multipage_classifier.decoder.donut_decoder import BARTDecoder
 class MultipageTransformerConfig(BaseModel):
     class Config:
         arbitrary_types_allowed = True
-        
+
     max_pages: int = 64
     max_seq_len: int = 768
 
@@ -48,37 +48,44 @@ class MultipageTransformer(nn.Module):
             page_encoder = torch.load(self.config.pretrained_encoder)
         else:
             page_encoder = SwinEncoder(
-                config.encoder_cfg # type: ignore
+                config.encoder_cfg  # type: ignore
             )
 
-        self.encoder = MultipageEncoder(page_encoder, self.config.max_pages, self.config.detached)
+        self.encoder = MultipageEncoder(
+            page_encoder, self.config.max_pages, self.config.detached
+        )
 
         self.decoder = BARTDecoder(
             decoder_layer=self.config.decoder_layer,
             hidden_dim=self.encoder.hidden_dim,
-            max_position_embeddings=self.config.max_seq_len if self.config.max_position_embeddings is None else self.config.max_position_embeddings,
+            max_position_embeddings=self.config.max_seq_len
+            if self.config.max_position_embeddings is None
+            else self.config.max_position_embeddings,
             special_tokens=self.config.special_tokens,
             name_or_path=self.config.decoder_name_or_path,
         )
+
     def forward(
         self,
         image_tensors: torch.Tensor,
         decoder_input_ids: torch.Tensor,
         decoder_labels: torch.Tensor,
-    ):  
+    ):
         encoder_outputs = self.encoder.forward(image_tensors[0]).unsqueeze(0)
+
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
             encoder_hidden_states=encoder_outputs,
             labels=decoder_labels,
-        ) 
+        )
 
         return decoder_outputs
 
     def inference(
         self,
         image_tensors: torch.Tensor,
-        prompt_tensors: torch.Tensor,
+        prompt: str | None = None,
+        prompt_tensors: torch.Tensor | None = None,
         return_json: bool = True,
     ):
         """
@@ -93,11 +100,22 @@ class MultipageTransformer(nn.Module):
         """
         encoder_outputs = self.encoder.forward(image_tensors)
 
+        if prompt is None and prompt_tensors is None:
+            raise ValueError("Expected either prompt or prompt_tensors")
+
+        if prompt_tensors is None:
+            prompt_tensors = self.decoder.tokenizer(
+                prompt,
+                add_special_tokens=False,
+                return_tensors="pt",  # type: ignore
+            )["input_ids"]
+
+        prompt_tensors = prompt_tensors.to(encoder_outputs.device)
+
         if len(encoder_outputs.size()) == 1:
             encoder_outputs = encoder_outputs.unsqueeze(0)
         if len(prompt_tensors.size()) == 1:
             prompt_tensors = prompt_tensors.unsqueeze(0)
-
 
         # get decoder output
         decoder_output = self.decoder.model.generate(
@@ -112,7 +130,7 @@ class MultipageTransformer(nn.Module):
             bad_words_ids=[[self.decoder.tokenizer.unk_token_id]],
             return_dict_in_generate=True,
         )
-        
+
         output = {"predictions": list()}
         for seq in self.decoder.tokenizer.batch_decode(decoder_output.sequences):
             seq = seq.replace(self.decoder.tokenizer.eos_token, "").replace(
@@ -125,9 +143,13 @@ class MultipageTransformer(nn.Module):
                 output["predictions"].append(self.token2json(seq))
             else:
                 output["predictions"].append(seq)
-
         return output
 
+    def predict(self, pixel_values: torch.Tensor):
+        return self.inference(
+            image_tensors=pixel_values,
+            prompt=self.config.special_tokens[0],  # TODO this is a bit hacky
+        )
 
     def json2token(
         self,
