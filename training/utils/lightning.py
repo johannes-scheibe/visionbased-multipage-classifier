@@ -7,9 +7,17 @@ import pytorch_lightning as pl
 import torch
 from sklearn.metrics import ConfusionMatrixDisplay
 from torch.nn import ModuleDict
-from torchmetrics import Accuracy, ConfusionMatrix, Metric, MetricCollection
-
+from torchmetrics import (
+    Accuracy,
+    ConfusionMatrix,
+    Metric,
+    MetricCollection,
+    F1Score,
+    Precision,
+    Recall,
+)
 from pytorch_lightning.loggers import TensorBoardLogger
+
 
 class Mode(Enum):
     TRAIN = "train"
@@ -24,11 +32,11 @@ class BaseLightningModule(pl.LightningModule):
     mode: Mode = Mode.TRAIN
 
     logger: TensorBoardLogger
+
     def __init__(self) -> None:
         super().__init__()
 
         self.init_metrics()
-        
 
     def init_metrics(self):
         metrics = torch.nn.ModuleDict({})
@@ -41,37 +49,68 @@ class BaseLightningModule(pl.LightningModule):
         self.confmat = confmat
 
     def add_metrics(self, key: str, metric: MetricCollection, mode: Mode):
-        self.metrics[f"_{mode.value}"][key] = metric # type: ignore
+        self.metrics[f"_{mode.value}"][key] = metric  # type: ignore
 
     def add_confmat(self, key: str, matrix: Metric, mode: Mode):
-        self.confmat[f"_{mode.value}"][key] = matrix # type: ignore
+        self.confmat[f"_{mode.value}"][key] = matrix  # type: ignore
 
     def set_default_metrics(
         self,
         key: str,
         task: Literal["binary", "multiclass", "multilabel"],
         num_classes: int | None = None,
-        num_labels: int | None= None,
-        confmat: bool = True
+        num_labels: int | None = None,
+        confmat: bool = True,
     ) -> None:
         for mode in Mode:
-            n = num_classes or num_labels 
+            n = num_classes or num_labels
             assert n
             top_k = min(n - 1, 3)
 
-            self.add_metrics(key, MetricCollection(
-                {
-                    "acc": Accuracy(task=task, num_classes=num_classes, num_labels=num_labels),
-                    f"top{top_k}_acc": Accuracy(
-                        task=task, num_classes=num_classes, num_labels=num_labels, top_k=top_k
-                    ),
-                },
-                postfix=f"_{key}",
-            ), mode)
+            self.add_metrics(
+                key,
+                MetricCollection(
+                    {
+                        "acc": Accuracy(
+                            task=task, num_classes=num_classes, num_labels=num_labels
+                        ),
+                        f"top{top_k}_acc": Accuracy(
+                            task=task,
+                            num_classes=num_classes,
+                            num_labels=num_labels,
+                            top_k=top_k,
+                        ),
+                        "recall": Recall(
+                            task=task,
+                            num_classes=num_classes,
+                            num_labels=num_labels,
+                        ),
+                        "precision": Precision(
+                            task=task,
+                            num_classes=num_classes,
+                            num_labels=num_labels,
+                        ),
+                        "f1": F1Score(
+                            task=task,
+                            num_classes=num_classes,
+                            num_labels=num_labels,
+                        ),
+                    },
+                    postfix=f"_{key}",
+                ),
+                mode,
+            )
             if confmat:
-                self.add_confmat(key, ConfusionMatrix(
-                    task=task, num_labels=num_labels, num_classes=num_classes, normalize="true"
-                ), mode)
+                self.add_confmat(
+                    key,
+                    ConfusionMatrix(
+                        task=task,
+                        num_labels=num_labels,
+                        num_classes=num_classes,
+                        normalize="true",
+                    ),
+                    mode,
+                )
 
     @abstractmethod
     def step(
@@ -112,10 +151,10 @@ class BaseLightningModule(pl.LightningModule):
         self.shared_epoch_end()
 
     def shared_epoch_end(self) -> None:
-        for k, m in self.metrics[f"_{self.mode.value}"].items(): # type: ignore
+        for k, m in self.metrics[f"_{self.mode.value}"].items():  # type: ignore
             self.log_metrics(m.compute())
             m.reset()
-        for k, c in self.confmat[f"_{self.mode.value}"].items(): # type: ignore
+        for k, c in self.confmat[f"_{self.mode.value}"].items():  # type: ignore
             fig_ = self.get_confusion_matrix(
                 c.compute().cpu().data.numpy(), c.num_classes
             )
@@ -139,11 +178,11 @@ class BaseLightningModule(pl.LightningModule):
         return fig
 
     def update_metrics(self, pred: Dict, gt):
-        for k, m in self.metrics[f"_{self.mode.value}"].items(): # type: ignore
+        for k, m in self.metrics[f"_{self.mode.value}"].items():  # type: ignore
             if k not in pred or k not in gt:
                 continue
             m.update(pred[k], gt[k])
-        for k, c in self.confmat[f"_{self.mode.value}"].items(): # type: ignore
+        for k, c in self.confmat[f"_{self.mode.value}"].items():  # type: ignore
             if k in pred and k in gt:
                 c.update(pred[k], gt[k])
 
@@ -173,7 +212,7 @@ class BaseLightningModule(pl.LightningModule):
             on_epoch=True,
             prog_bar=True,
             logger=True,
-            sync_dist=True
+            sync_dist=True,
         )
 
         return losses
