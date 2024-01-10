@@ -25,7 +25,10 @@ class PageComparisonEncoderPLModule(BaseLightningModule):
         self.config = cfg
 
         self.set_default_metrics(
-            "order", task="multiclass", num_classes=len(ORDER_NAMES)
+            "order",
+            task="multiclass",
+            num_classes=len(ORDER_NAMES),
+            display_labels=ORDER_NAMES,
         )
         self.set_default_metrics(
             "page_nr", task="multiclass", num_classes=self.config.max_page_nr

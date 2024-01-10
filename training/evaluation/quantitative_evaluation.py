@@ -9,21 +9,27 @@ from multipage_transformer.lightning_module import (
 )
 from visual_page_classifier.lightning_module import VisualPageClassifierPLModule
 
+from swin_encoder.lightning_module import SwinEncoderPLModule, ORDER_NAMES
+from vision_encoder.lightning_module import VisionEncoderPLModule, ORDER_NAMES
+
+from vision_encoder.lightning_module import VisionEncoderPLModule
+
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from multipage_classifier.datasets.mosaic_dataset import MosaicDataModule
 
 LIGHTNING_PATH = "/data/training/master_thesis/testing_logs"
-MODEL_PATH = "/data/training/master_thesis/evaluation_logs/classifiers/multipage_transformer/version_1/checkpoints/best-checkpoint.ckpt"
+MODEL_PATH = "/data/training/master_thesis/evaluation_logs/classifiers/visual_page_classifier/version_0/checkpoints/best-checkpoint.ckpt"
 
 MODEL_NAME = MODEL_PATH.split("/")[5]
 print(MODEL_NAME)
 
 # Load Model
-model: MultipageTransformerPLModule = MultipageTransformerPLModule.load_from_checkpoint(
+model: VisualPageClassifierPLModule = VisualPageClassifierPLModule.load_from_checkpoint(
     MODEL_PATH, map_location="cpu"
 )
+model.metric_labels["order"] = ORDER_NAMES
 
 DATASET_PATH = "/data/training/master_thesis/datasets/2023-05-23"
 CLASS_PATH = "/data/training/master_thesis/datasets/bzuf_classes.json"
@@ -39,17 +45,19 @@ IMAGE_SIZE = (704, 512)
 # BZUF classes
 classes = [c for c in json.load(open(CLASS_PATH))]
 
-# data_module = MosaicDataModule(
-#     Path(DATASET_PATH),
-#     classes,
-#     model.classifier.encoder.page_encoder.prepare_input,
-#     batch_size=BATCH_SIZE,
-#     max_pages=MAX_PAGES,
-#     num_workers=NUM_WORKERS,
-# )
-data_module = MultipagePLDataModule(
-    Path(DATASET_PATH), model.model, task_prompt=TASK_PROMPT, num_workers=NUM_WORKERS
+model.metric_labels["doc_class"] = classes
+
+data_module = MosaicDataModule(
+    Path(DATASET_PATH),
+    classes,
+    model.classifier.encoder.page_encoder.prepare_input,
+    batch_size=BATCH_SIZE,
+    max_pages=MAX_PAGES,
+    num_workers=NUM_WORKERS,
 )
+# data_module = MultipagePLDataModule(
+#     Path(DATASET_PATH), model.model, task_prompt=TASK_PROMPT, num_workers=NUM_WORKERS
+# )
 
 # Configure checkpointing
 checkpoint_callback = ModelCheckpoint(
@@ -74,4 +82,4 @@ trainer = pl.Trainer(
     precision=32,
 )
 print("Testing", MODEL_NAME, MODEL_PATH)
-trainer.test(model, data_module)
+trainer.validate(model, data_module)

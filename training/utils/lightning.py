@@ -47,6 +47,7 @@ class BaseLightningModule(pl.LightningModule):
 
         self.metrics = metrics
         self.confmat = confmat
+        self.metric_labels: dict[str, list[str]] = {}
 
     def add_metrics(self, key: str, metric: MetricCollection, mode: Mode):
         self.metrics[f"_{mode.value}"][key] = metric  # type: ignore
@@ -61,7 +62,9 @@ class BaseLightningModule(pl.LightningModule):
         num_classes: int | None = None,
         num_labels: int | None = None,
         confmat: bool = True,
+        display_labels: list[str] = None,
     ) -> None:
+        self.metric_labels[key] = display_labels
         for mode in Mode:
             n = num_classes or num_labels
             assert n
@@ -156,7 +159,7 @@ class BaseLightningModule(pl.LightningModule):
             m.reset()
         for k, c in self.confmat[f"_{self.mode.value}"].items():  # type: ignore
             fig_ = self.get_confusion_matrix(
-                c.compute().cpu().data.numpy(), c.num_classes
+                c.compute().cpu().data.numpy(), c.num_classes, self.metric_labels[k]
             )
             self.logger.experiment.add_figure(
                 f"{self.mode.value}_confmat_{k}",
@@ -165,11 +168,11 @@ class BaseLightningModule(pl.LightningModule):
             )
             c.reset()
 
-    def get_confusion_matrix(self, cf_matrix, num_classes):
+    def get_confusion_matrix(self, cf_matrix, num_classes, labels=None):
         fig, ax = plt.subplots(
             figsize=(max(num_classes * 0.25, 5), max((num_classes * 0.25, 5)))
         )
-        ConfusionMatrixDisplay(cf_matrix).plot(
+        ConfusionMatrixDisplay(cf_matrix, display_labels=labels).plot(
             ax=ax,
             include_values=False,
             xticks_rotation="vertical",

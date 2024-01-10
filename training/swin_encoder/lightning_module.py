@@ -25,7 +25,7 @@ class SwinEncoderPLModule(BaseLightningModule):
             torch.nn.Linear(len(ORDER_NAMES), len(ORDER_NAMES))
         )
 
-        self.set_default_metrics("order", task="multiclass", num_classes=len(ORDER_NAMES))
+        self.set_default_metrics("order", task="multiclass", num_classes=len(ORDER_NAMES), display_labels=ORDER_NAMES)
 
 
     def forward(self, batch, **kwargs) -> torch.Tensor:
